@@ -63,7 +63,7 @@ ClearOldFiles()
 {
 	local FILES
 	local NUM="1"
-	FILES=$(find "$BACKUPDIR" -maxdepth 1 -type f -name "*-""$1""sql.gz" | wc -l)
+	FILES=$(find "$BACKUPDIR" -maxdepth 1 -type f -name "*-""$1"".sql.gz" | wc -l)
 	if [ "$FILES" -gt "$FILEBACK" ] ; then
 		FILEBACK=$((FILEBACK+NUM))
 		cd $BACKUPDIR || exit

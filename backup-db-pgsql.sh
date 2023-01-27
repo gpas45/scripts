@@ -63,7 +63,7 @@ ClearOldFiles()
 {
 	local FILES
 	local NUM="1"
-	FILES=$(find "$BACKUPDIR" -maxdepth 1 -type f -name "*.gz" | wc -l)
+	FILES=$(find "$BACKUPDIR" -maxdepth 1 -type f -name "*-""$1""sql.gz" | wc -l)
 	if [ "$FILES" -gt "$FILEBACK" ] ; then
 		FILEBACK=$((FILEBACK+NUM))
 		cd $BACKUPDIR || exit
@@ -113,12 +113,11 @@ for i in $(cat $BASES);
 	do
 		if Backup $i ; then
 			Maintance $i
+			ClearOldFiles $i
 		else
 			exit
 		fi
 	done
-
-ClearOldFiles $i
 
 (date +%Y-%m-%d_%H-%M) > /var/log/timestamp
 echo "$(date +%Y-%m-%d_%H-%M-%S)" "Создание файла для мониторинга" >> "$LOGS"/"$DATA".log

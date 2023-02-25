@@ -15,9 +15,9 @@ zabbix_export:
         smartmontools (прописать Path), OHM (как сервис)
         
         Необходимые скрипты:
-        windows.hard.ps1 -> C:\System\Zabbix\Scripts\
+        windows.hard.ps1 -> C:\Zabbix\Scripts\
         
-        UserParameter=ZScript[*],powershell C:\System\Zabbix\Scripts\windows.$1.ps1 "$2" "$3"
+        UserParameter=ZScript[*],powershell C:\Zabbix\Scripts\windows.$1.ps1 "$2" "$3"
       groups:
         -
           name: Templates

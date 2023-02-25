@@ -1,0 +1,311 @@
+zabbix_export:
+  version: '6.0'
+  date: '2023-02-25T06:51:54Z'
+  groups:
+    -
+      uuid: 7df96b18c230490a9a0a9e2307226338
+      name: Templates
+  templates:
+    -
+      uuid: 58e6e599673c49dc9235afb44a45d9b2
+      template: 'Hardware - Windows'
+      name: 'Hardware - Windows'
+      description: |
+        Необходимы компоненты:
+        smartmontools (прописать Path), OHM (как сервис)
+        
+        Необходимые скрипты:
+        windows.hard.ps1 -> C:\System\Zabbix\Scripts\
+        
+        UserParameter=ZScript[*],powershell C:\System\Zabbix\Scripts\windows.$1.ps1 "$2" "$3"
+      groups:
+        -
+          name: Templates
+      items:
+        -
+          uuid: 75eb26dc8fff4241b5ed3408988601da
+          name: 'Напряжение батареи BIOS'
+          type: ZABBIX_ACTIVE
+          key: 'ZScript[hard,VBAT]'
+          delay: '300'
+          value_type: FLOAT
+          units: V
+          tags:
+            -
+              tag: Application
+              value: Оборудование
+          triggers:
+            -
+              uuid: 72b2dfc32be84c1da9519c98819158b3
+              expression: 'last(/Hardware - Windows/ZScript[hard,VBAT],#3)<2.9'
+              name: 'Слишком низкое напряжение батареи BIOS на {HOST.NAME}'
+              priority: AVERAGE
+      discovery_rules:
+        -
+          uuid: 37240913704a43a6803d618e2f19aa5a
+          name: 'Обнаружение кулеров'
+          type: ZABBIX_ACTIVE
+          key: 'ZScript[hard,discovery,fan]'
+          delay: '7200'
+          lifetime: 3d
+          item_prototypes:
+            -
+              uuid: ee5179f2f6f4416ea7f45ef301048655
+              name: 'Обороты кулера {#NAME}'
+              key: 'ZScript[hard,{#ID},fan]'
+              delay: '300'
+              tags:
+                -
+                  tag: Application
+                  value: Оборудование
+              trigger_prototypes:
+                -
+                  uuid: e5adc9f3b0084c39b5ba8220589ca8c0
+                  expression: 'avg(/Hardware - Windows/ZScript[hard,{#ID},fan],#3)<150'
+                  name: 'Проблема с кулером {#NAME} на {HOST.NAME}'
+                  priority: AVERAGE
+        -
+          uuid: 12e435316f5040b99f6892e3439aa70f
+          name: 'Обнаружение датчиков температур'
+          type: ZABBIX_ACTIVE
+          key: 'ZScript[hard,discovery,temperature]'
+          delay: '7200'
+          lifetime: 3d
+          item_prototypes:
+            -
+              uuid: 2026bb74e3494bb280196cc53ee3e4b3
+              name: 'Температура {#NAME}'
+              key: 'ZScript[hard,{#ID},temperature]'
+              delay: '120'
+              units: °C
+              tags:
+                -
+                  tag: Application
+                  value: Оборудование
+              trigger_prototypes:
+                -
+                  uuid: a5639e0420614f1ebf9896ab53e638f7
+                  expression: 'last(/Hardware - Windows/ZScript[hard,{#ID},temperature],#3)>60'
+                  name: 'Высокая температура {#NAME} на {HOST.NAME}!'
+                  priority: HIGH
+                -
+                  uuid: 4568c49105ae4ae9a076bb45c0484b77
+                  expression: 'last(/Hardware - Windows/ZScript[hard,{#ID},temperature],#3)>70'
+                  name: 'Слишком высокая температура {#NAME} на {HOST.NAME}!'
+                  priority: DISASTER
+        -
+          uuid: 805d8ae6005f4ba4b3a3cb84b76ec24e
+          name: 'Обнаружение датчиков напряжения'
+          type: ZABBIX_ACTIVE
+          key: 'ZScript[hard,discovery,voltage]'
+          delay: '7200'
+          lifetime: 3d
+          item_prototypes:
+            -
+              uuid: e0bfcdfab3f04587b518b397fdabca16
+              name: 'Напряжение {#NAME}'
+              key: 'ZScript[hard,{#ID},voltage]'
+              delay: '300'
+              value_type: FLOAT
+              units: V
+              tags:
+                -
+                  tag: Application
+                  value: Оборудование
+        -
+          uuid: 843847727b244ceaa0258dba1396ee2b
+          name: 'Обнаружение дисков'
+          type: ZABBIX_ACTIVE
+          key: 'ZScript[hdd,discovery]'
+          delay: '7200'
+          lifetime: 3d
+          item_prototypes:
+            -
+              uuid: 8ad39e592b734490aa02da28c367d6ac
+              name: 'Диск {#DISKID} - SMART - Spin-Up Time [3]'
+              key: 'ZScript[hdd,{#DISKID},3]'
+              delay: '3600'
+              tags:
+                -
+                  tag: Application
+                  value: 'Жесткие диски'
+            -
+              uuid: 445ac4a157c84cc89b207d62260d1b05
+              name: 'Диск {#DISKID} - SMART - Reallocated Sectors Count [5]'
+              key: 'ZScript[hdd,{#DISKID},5]'
+              delay: '3600'
+              tags:
+                -
+                  tag: Application
+                  value: 'Жесткие диски'
+            -
+              uuid: 21825a9336514754b8809e4c85b6b96d
+              name: 'Диск {#DISKID} - SMART - Seek Error Rate [7]'
+              key: 'ZScript[hdd,{#DISKID},7]'
+              delay: '3600'
+              tags:
+                -
+                  tag: Application
+                  value: 'Жесткие диски'
+            -
+              uuid: 3f87555925aa46529e0b5fbf06522cf3
+              name: 'Диск {#DISKID} - SMART - Power-on Time Count [9] (часов)'
+              key: 'ZScript[hdd,{#DISKID},9]'
+              delay: '3600'
+              tags:
+                -
+                  tag: Application
+                  value: 'Жесткие диски'
+            -
+              uuid: 1d65eaf4326f440e8c04dda595c8c805
+              name: 'Диск {#DISKID} - SMART - Spin-Up Retry Count [10]'
+              key: 'ZScript[hdd,{#DISKID},10]'
+              delay: '3600'
+              tags:
+                -
+                  tag: Application
+                  value: 'Жесткие диски'
+            -
+              uuid: ef4306e9c2dd43be9593bb821444ad27
+              name: 'Диск {#DISKID} - SMART - G-sense error rate [191]'
+              key: 'ZScript[hdd,{#DISKID},191]'
+              delay: '3600'
+              tags:
+                -
+                  tag: Application
+                  value: 'Жесткие диски'
+            -
+              uuid: cb83d1318de44bb9934ae33fc18cff2e
+              name: 'Диск {#DISKID} - SMART - Температура [194]'
+              key: 'ZScript[hdd,{#DISKID},194]'
+              delay: '300'
+              units: °C
+              tags:
+                -
+                  tag: Application
+                  value: 'Жесткие диски'
+              trigger_prototypes:
+                -
+                  uuid: 6a1de847c27e4ebab0cb783388cc2492
+                  expression: 'last(/Hardware - Windows/ZScript[hdd,{#DISKID},194])>55'
+                  name: 'Высокая температура диска на {HOST.NAME}'
+                  priority: AVERAGE
+                -
+                  uuid: 25e5791dfe334a2cb6cbf85b51bec17a
+                  expression: 'last(/Hardware - Windows/ZScript[hdd,{#DISKID},194])>60'
+                  name: 'Опасная температура диска на {HOST.NAME}'
+                  priority: HIGH
+            -
+              uuid: 9551bf4af0174d509cf2cedc09c08473
+              name: 'Диск {#DISKID} - SMART - Reallocation Event Count [196]'
+              key: 'ZScript[hdd,{#DISKID},196]'
+              delay: '3600'
+              tags:
+                -
+                  tag: Application
+                  value: 'Жесткие диски'
+            -
+              uuid: 5d13f228d97446de882e5243a1a28739
+              name: 'Диск {#DISKID} - SMART - Current Pending Sector Count [197]'
+              key: 'ZScript[hdd,{#DISKID},197]'
+              delay: '3600'
+              tags:
+                -
+                  tag: Application
+                  value: 'Жесткие диски'
+            -
+              uuid: 6886b1e4e2c74a7e83f707fa77bbbbf0
+              name: 'Диск {#DISKID} - SMART - Uncorrectable Sector Count [198]'
+              key: 'ZScript[hdd,{#DISKID},198]'
+              delay: '3600'
+              tags:
+                -
+                  tag: Application
+                  value: 'Жесткие диски'
+            -
+              uuid: b0aae5e77bb34175abfe1e022685393b
+              name: 'Диск {#DISKID} - SMART - UltraDMA CRC Error Count [199]'
+              key: 'ZScript[hdd,{#DISKID},199]'
+              delay: '3600'
+              tags:
+                -
+                  tag: Application
+                  value: 'Жесткие диски'
+            -
+              uuid: a968cbfd06f94af392a68221f26d8393
+              name: 'Диск {#DISKID} - Номинальная емкость'
+              key: 'ZScript[hdd,{#DISKID},capacity]'
+              delay: '3600'
+              history: 7d
+              trends: '0'
+              value_type: CHAR
+              tags:
+                -
+                  tag: Application
+                  value: 'Жесткие диски'
+            -
+              uuid: d7d50c689d8f4af88f721203da80b23b
+              name: 'Диск {#DISKID} - Семество'
+              key: 'ZScript[hdd,{#DISKID},family]'
+              delay: '3600'
+              history: 7d
+              trends: '0'
+              value_type: CHAR
+              tags:
+                -
+                  tag: Application
+                  value: 'Жесткие диски'
+            -
+              uuid: 1d34923a0f2947fb9f27405136e97d1d
+              name: 'Диск {#DISKID} - Версия FW'
+              key: 'ZScript[hdd,{#DISKID},fw]'
+              delay: '3600'
+              history: 7d
+              trends: '0'
+              value_type: CHAR
+              tags:
+                -
+                  tag: Application
+                  value: 'Жесткие диски'
+            -
+              uuid: b9ff630c97dd442aae065c5d48fa30c8
+              name: 'Диск {#DISKID} - Модель'
+              key: 'ZScript[hdd,{#DISKID},model]'
+              delay: '3600'
+              history: 7d
+              trends: '0'
+              value_type: CHAR
+              tags:
+                -
+                  tag: Application
+                  value: 'Жесткие диски'
+            -
+              uuid: accfe4e2a1e24dd5bf84ee8c5d7589f2
+              name: 'Диск {#DISKID} - Серийный номер'
+              key: 'ZScript[hdd,{#DISKID},serial]'
+              delay: '3600'
+              history: 7d
+              trends: '0'
+              value_type: CHAR
+              tags:
+                -
+                  tag: Application
+                  value: 'Жесткие диски'
+            -
+              uuid: c49c9a8869ae44658a328b2f7dea88c4
+              name: 'Диск {#DISKID} - Статус SMART'
+              key: 'ZScript[hdd,{#DISKID},status]'
+              delay: '300'
+              history: 7d
+              trends: '0'
+              value_type: CHAR
+              tags:
+                -
+                  tag: Application
+                  value: 'Жесткие диски'
+              trigger_prototypes:
+                -
+                  uuid: 053a1eb8d5f34eaf8c528712b70ca3e7
+                  expression: 'find(/Hardware - Windows/ZScript[hdd,{#DISKID},status],,"regexp","^PASSED$")=1'
+                  name: 'SMART диска не пройден на {HOST.NAME}'
+                  priority: HIGH

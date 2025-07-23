@@ -1,6 +1,4 @@
 #!/bin/bash
-PATH=/sbin:/bin:/usr/sbin:/usr/bin
-
 #Скрипт для бэкапа и обслуживания баз данных PostgreSQL
 
 
@@ -14,10 +12,10 @@ DATA="$(date +%Y-%m-%d_%H-%M)"
 LOGS=/var/lib/pgpro/service_logs
 
 #Директория для бэкапов
-BACKUPDIR=/var/lib/backup/pgpro
+BACKUPDIR=/var/lib/pgpro/_backup
 
 #Минимальное количество бэкапов
-FILEBACK="28"
+FILEBACK="5"
 
 
 CheckDir()
@@ -46,9 +44,10 @@ CheckDB()
 Backup()
 {
 	CheckDir "$BACKUPDIR" "$DATA"
+	CheckDir "$LOGS" "$DATA"
 	CheckDB "$BASES"
 	echo "$(date +%Y-%m-%d_%H-%M-%S)" "Старт резервного копирования" "$1" >> "$LOGS"/"$DATA".log
-	sudo -u postgres /usr/bin/pg_dump -U postgres "$1" | pigz > "$BACKUPDIR"/"$DATA"-"$1".sql.gz 2>>"$LOGS"/"$DATA".log
+	/usr/bin/pg_dump -U postgres "$1" | pigz > "$BACKUPDIR"/"$DATA"-"$1".sql.gz 2>>"$LOGS"/"$DATA".log
         if [[  $? -eq 0 ]]; then
                 echo "$(date +%Y-%m-%d_%H-%M-%S)" "Резервное копирование закончено" "$1" >> "$LOGS"/"$DATA".log
                 return 0
@@ -83,14 +82,14 @@ Maintance()
 {
 	if [[ $(date "+%u") == 6 ]]; then
 		echo "$(date +%Y-%m-%d_%H-%M-%S)" "Старт vacuumdb FULL" "$1" >> "$LOGS"/"$DATA".log
-		if sudo -Hiu postgres /usr/bin/vacuumdb --full --analyze --username postgres --dbname "$1" > /dev/null 2>&1 ; then
+		if /usr/bin/vacuumdb --full --analyze --username postgres --dbname "$1" > /dev/null 2>&1 ; then
 			echo "$(date +%Y-%m-%d_%H-%M-%S)" "Конец vacuumdb FULL" "$1" >> "$LOGS"/"$DATA".log
 		else
 			echo "$(date +%Y-%m-%d_%H-%M-%S)" "Ошибка vacuumdb FULL" "$1" >> "$LOGS"/"$DATA".log
 			exit
 		fi
 		echo "$(date +%Y-%m-%d_%H-%M-%S)" "Старт переиндексации" "$1" >> "$LOGS"/"$DATA".log
-		if sudo -Hiu postgres /usr/bin/reindexdb --username postgres --dbname "$1" > /dev/null 2>&1 ; then
+		if /usr/bin/reindexdb --username postgres --dbname "$1" > /dev/null 2>&1 ; then
 			echo "$(date +%Y-%m-%d_%H-%M-%S)" "Конец переиндексации" "$1" >> "$LOGS"/"$DATA".log
 		else
 			exit
@@ -98,7 +97,7 @@ Maintance()
 		return 0
 	else
 		echo "$(date +%Y-%m-%d_%H-%M-%S)" "Старт vacuumdb" "$1" >> "$LOGS"/"$DATA".log
-		if sudo -Hiu postgres /usr/bin/vacuumdb --analyze --username postgres --dbname "$1" > /dev/null 2>&1 ; then
+		if /usr/bin/vacuumdb --analyze --username postgres --dbname "$1" > /dev/null 2>&1 ; then
 			echo "$(date +%Y-%m-%d_%H-%M-%S)" "Конец vacuumdb" "$1" >> "$LOGS"/"$DATA".log
 		else
 			echo "$(date +%Y-%m-%d_%H-%M-%S)" "Ошибка vacuumdb" "$1" >> "$LOGS"/"$DATA".log
@@ -119,5 +118,5 @@ for i in $(cat $BASES);
 		fi
 	done
 
-(date +%Y-%m-%d_%H-%M) > /var/log/timestamp
+(date +%Y-%m-%d_%H-%M) > "$LOGS"/timestamp
 echo "$(date +%Y-%m-%d_%H-%M-%S)" "Создание файла для мониторинга" >> "$LOGS"/"$DATA".log

@@ -22,3 +22,5 @@ set allowed-interface-list=none
 set enabled=no
 /ipv6 settings
 set disable-ipv6=yes
+/system clock
+set time-zone-name=Asia/Yekaterinburg

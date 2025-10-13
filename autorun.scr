@@ -24,3 +24,7 @@ set enabled=no
 set disable-ipv6=yes
 /system clock
 set time-zone-name=Asia/Yekaterinburg
+/system ntp client
+set enabled=yes
+/system ntp client servers
+add address=pool.ntp.org

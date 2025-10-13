@@ -20,3 +20,5 @@ set allowed-interface-list=none
 set allowed-interface-list=none
 /tool mac-server ping
 set enabled=no
+/ipv6 settings
+set disable-ipv6=yes

@@ -40,10 +40,67 @@ PG_MAJOR="$(echo "${PGVER}" | sed -E 's/.*-([0-9]+).*/\1/')"
 
 export DEBIAN_FRONTEND=noninteractive
 
+# -------- Предварительные проверки: наличие установленного PG и каталога данных --------
+
+# Функция вопроса (Y/N | Д/Н)
+ask_yes_no() {
+  local prompt="$1"
+  local def="${2:-N}"   # по умолчанию: N
+  local ans=""
+  # не падаем на set -e при нажатии Ctrl-D/EOF
+  read -r -p "$prompt " ans || true
+  ans="${ans:-$def}"
+  case "$ans" in
+    [Yy]|[Yy][Ee][Ss]|[Дд]|[Дд][Аа]) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# 1) Проверка установлен ли PostgreSQL/Postgres Pro (любой сервер)
+PG_INSTALLED=0
+# Postgres Pro server
+if dpkg -l 2>/dev/null | grep -Eq '^ii\s+postgrespro-.*-server\b'; then PG_INSTALLED=1; fi
+# Community PostgreSQL server (например, postgresql-16 или метапакет postgresql)
+if dpkg -l 2>/dev/null | grep -Eq '^ii\s+postgresql(-[0-9]+)?\b'; then PG_INSTALLED=1; fi
+# Systemd unit любого postgrespro-*.service
+if systemctl list-unit-files 2>/dev/null | grep -qE '^postgrespro-.*\.service'; then PG_INSTALLED=1; fi
+# Наличие бинарей текущей версии
+if [[ -x "${PG_BIN}/postgres" ]]; then PG_INSTALLED=1; fi
+
+if [[ "${PG_INSTALLED}" -eq 1 ]]; then
+  echo "Обнаружена установленная СУБД PostgreSQL/Postgres Pro на хосте."
+  echo "Во избежание повреждения существующей инсталляции выполнение прервано."
+  echo "Удалите/отключите текущую СУБД и запустите скрипт на чистой системе."
+  exit 1
+fi
+
+# 2) Проверка существования каталога данных кластера
+DID_DATA_BACKUP=0
+if [[ -d "${PG_DATA}" ]]; then
+  echo "Внимание: обнаружен каталог данных кластера: ${PG_DATA}"
+  if ask_yes_no "Продолжить установку? Это может перезаписать данные. [y/N]" "N"; then
+    if ask_yes_no "Сделать резервную копию каталога (переименовать в ${PG_DATA}.backup)? [Y/n]" "Y"; then
+      PG_DATA_BKP="${PG_DATA}.backup"
+      # если .backup уже существует — добавим метку времени
+      if [[ -e "${PG_DATA_BKP}" ]]; then
+        PG_DATA_BKP="${PG_DATA}.backup.$(date +%F_%H%M%S)"
+      fi
+      mv "${PG_DATA}" "${PG_DATA_BKP}"
+      echo "Каталог сохранён: ${PG_DATA_BKP}"
+      DID_DATA_BACKUP=1
+    else
+      echo "Резервная копия не выполнена. Текущий ${PG_DATA} будет удалён в рамках переинициализации."
+    fi
+  else
+    echo "Операция отменена пользователем."
+    exit 0
+  fi
+fi
+
 # -------- Обновление системы и базовые пакеты --------
 apt-get update -y
 apt-get -o Dpkg::Options::="--force-confnew" dist-upgrade -y
-apt-get install -y mc nano console-setup net-tools htop tmux curl ca-certificates gnupg lsb-release locales
+apt-get install -y mc nano console-setup net-tools htop tmux curl ca-certificates gnupg lsb-release locales sudo
 
 # -------- Локали --------
 for L in "${LOCALES[@]}"; do
@@ -89,6 +146,7 @@ setupcon -k || true
 # -------- .bashrc для окружения bash --------
 curl -fsSL "${BASHRC_URL}" -o /etc/skel/.bashrc
 install -m 0644 /etc/skel/.bashrc /root/.bashrc
+source /root/.bashrc
 if id postgres >/dev/null 2>&1; then
   POSTGRES_HOME="$(getent passwd postgres | cut -d: -f6)"
   install -o postgres -g postgres -m 0644 /etc/skel/.bashrc "${POSTGRES_HOME}/.bashrc"

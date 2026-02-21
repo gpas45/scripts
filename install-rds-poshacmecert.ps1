@@ -1,4 +1,5 @@
 # Скрипт для установки сертификата LetsEncrypt для шлюза Remote Desktop Gateway
+# В данном случае домен припаркован у хостера Beget
 
 # Функция для записи в журнал событий
 function Write-ToEventLog {
@@ -9,8 +10,8 @@ function Write-ToEventLog {
     Write-EventLog -LogName "Application" -Source "ACME Cert Management" -EventID 1001 -EntryType $Type -Message $Message
 }
 
-$certNames = 'rds.vash-profbuh.ru'
-$email = 'gpas@dioservice.ru'
+$certNames = 'example.com'
+$email = 'admin@example.com'
 $env:POSHACME_HOME = 'C:\poshacme'
 
 if (!(Test-Path c:\poshacme)) {

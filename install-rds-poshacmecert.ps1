@@ -1,7 +1,7 @@
 # Скрипт для установки сертификата LetsEncrypt для шлюза Remote Desktop Gateway
 # В данном случае домен припаркован у хостера Beget
 
-# Функция для записи в журнал событий
+# Функция дл¤ записи в журнал событий
 function Write-ToEventLog {
     param (
         [string]$Message,
@@ -10,8 +10,8 @@ function Write-ToEventLog {
     Write-EventLog -LogName "Application" -Source "ACME Cert Management" -EventID 1001 -EntryType $Type -Message $Message
 }
 
-$certNames = 'example.com'
-$email = 'admin@example.com'
+$certNames = 'rds.vash-profbuh.ru'
+$email = 'gpas@dioservice.ru'
 $env:POSHACME_HOME = 'C:\poshacme'
 
 if (!(Test-Path c:\poshacme)) {
@@ -20,7 +20,7 @@ if (!(Test-Path c:\poshacme)) {
 
 $credentialFile = "C:\poshacme\BegetCred.xml"
 if (!(Test-Path $credentialFile)) {
-    $errorMsg = "Файл с учётными данными не найден. Сохраните их с помощью: `$cred = Get-Credential; `$cred | Export-Clixml -Path '$credentialFile'"
+    $errorMsg = "Файл с учётными данными не найден. сохраните их с помощью: `$cred = Get-Credential; `$cred | Export-Clixml -Path '$credentialFile'"
     Write-Host $errorMsg
     Write-ToEventLog $errorMsg "Error"
     throw $errorMsg
@@ -28,12 +28,12 @@ if (!(Test-Path $credentialFile)) {
 try {
     $begetCred = Import-Clixml -Path $credentialFile
 } catch {
-    $errorMsg = "ќшибка загрузки учЄтных данных Beget: $_"
+    $errorMsg = "Ошибка загрузки учётных данных Beget: $_"
     Write-ToEventLog $errorMsg "Error"
     throw $errorMsg
 }
 
-# Аргументы дл¤ плагина Beget
+# Аргументы для плагина Beget
 $pArgs = @{
     BegetCredential = $begetCred
 }
@@ -56,4 +56,4 @@ Import-Module Posh-ACME.Deploy
 Set-PAServer LE_PROD
 #Set-PAServer LE_STAGE
 
-New-PACertificate $certNames -AcceptTOS -Contact $email -Plugin Beget -PluginArgs $pArgs | Set-RDGWCertificate
+New-PACertificate $certNames -AcceptTOS -Contact $email -Plugin Beget -PluginArgs $pArgs | Set-RDGWCertificate -RemoveOldCert

@@ -1,0 +1,842 @@
+## =====================
+## Управление процессами
+## =====================
+# Показать топ-5 процессов по потреблению CPU
+ps --sort=-%cpu -eo user,pid,ppid,state,comm | head -n6
+# Показать топ-5 процессов по потреблению памяти
+ps --sort=-%mem -eo user,pid,ppid,state,comm | head -n6
+# Вывести процессы в виде дерева
+ps -axf -eo user,pid,ppid,state,comm
+# Найти родительские процессы зомби
+ps -eo user,pid,ppid,state,comm | awk 'NR==1 || $4=="Z"'
+# Показать команду родительского процесса по PID
+ps -o pid,command --ppid 698
+# Вывести иерархию cgroups, управляемых systemd
+systemd-cgls
+# Вывести иерархию процессов (pstree)
+pstree -p -t -n -C age
+# Найти уникальные бинарные файлы, запущенные пользователем
+for pid in $(ps -u $USER -o pid); do exe=$(readlink -f /proc/$pid/exe 2> /dev/null); if [[ -e "$exe" ]]; then echo "$pid:$exe"; fi; done | sort -u -t':' -k2,2
+# Показать максимальный лимит памяти для cgroup процесса/сервиса
+pid=$(systemctl show <service-name> -p MainPID --value); cgroup_path=$(grep '^0::' /proc/$pid/cgroup | cut -d: -f3); cat /sys/fs/cgroup${cgroup_path}/memory.max
+# Показать максимальный лимит CPU для cgroup процесса
+pid=<PID>; cgroup_path=$(grep '^0::' /proc/$pid/cgroup | cut -d: -f3); cat /sys/fs/cgroup${cgroup_path}/cpu.max
+# Показать лимиты ресурсов для процесса (ulimit)
+cat /proc/<PID>/limits
+# Найти процессы, использующие указанную точку монтирования/директорию
+lsof +D "/opt" 2> /dev/null | awk 'NR > 1 {print $2, $1}' | sort -u | while read pid p_name; do cmd=$(cat "/proc/$pid/cmdline" 2> /dev/null | tr '\0' ' '); echo "PID: $pid, NAME: $p_name, CMD: $cmd"; done
+
+## ==================
+## Мониторинг системы
+## ==================
+# Получить моментальный снимок процессов (top в пакетном режиме)
+top -b -n 1
+# Показать текущее использование CPU (vmstat)
+vmstat 1 2 | tail -1 | awk '{print 100 - $15 "%"}'
+# Вывести точки монтирования с использованием >80%
+df -h | awk '$5 ~ /^8[0-9]%/ {print $6}'
+# Показать топ-20 крупнейших файлов/директорий
+du -h / 2> /dev/null | sort -rh | head -n 20
+# Показать топ-20 крупнейших файлов/директорий (с точными размерами IEC)
+du -x --block-size=1 / 2>/dev/null | sort -rn | head -n 20 | numfmt --to=iec
+# Показать использование дискового пространства журналами systemd
+journalctl --disk-usage
+# Вывести открытые файлы в указанной директории
+lsof +D /opt
+# Показать время запуска системы в формате unixtime
+date -d "$(uptime -s)" +%s
+# Вывести топ-10 наиболее часто используемых команд bash
+history | awk '{print $2}' | sort | uniq -c | sort -rn | head
+# Вывести топ-10 процессов, использующих swap-память
+for file in /proc/*/status ; do awk '/VmSwap|Name/{printf $2 " " $3}END{ print ""}' $file; done | sort -k 2 -n -r | head -n 10
+# Проверить текущее значение swappiness
+cat /proc/sys/vm/swappiness
+# Вывести OOM-оценки и корректировки для процессов
+printf "PID\tOOM Score\tOOM Adj\tCommand\n"; while read -r pid comm; do [ -f /proc/$pid/oom_score ] && [ $(cat /proc/$pid/oom_score) != 0 ] && printf "%d\t%d\t\t%d\t%s\n" "$pid" "$(cat /proc/$pid/oom_score)" "$(cat /proc/$pid/oom_score_adj)" "$comm"; done < <(ps -e -o pid= -o comm=) | sort -k 2nr
+# Мониторинг дискового ввода/вывода (iotop)
+iotop -o -P -d 5
+# Мониторинг статистики CPU и дисковых устройств (iostat)
+iostat -x 2
+# Найти IP-адреса в файле лога (grep)
+grep -a -E '([0-9]{1,3}\.){3}[0-9]{1,3}' /var/log/nginx/access.log
+# Показать среднюю загрузку системы (sar)
+sar -q 1 5
+
+## =================================
+## Управление файлами и директориями
+## =================================
+# Заменить текст в файле (с созданием резервной копии)
+sed -i.bkp 's/old_text/new_text/g' ./file.txt
+# Вставить новую строку в начало файла
+sed -i.bkp '1i test_line' ./file.txt
+# Вставить многострочный блок в начало файла
+sed -i.bkp '1i test_line:\n    value1\n    value2' ./file.txt
+# Изменить подстроку в строке, начинающейся с определенного шаблона
+sed '\|^test_line|s|line|word|'
+# Найти и установить права 644 для всех файлов
+find /path -type f -exec chmod 644 {} \;
+# Найти и установить права 755 для всех директорий
+find /path -type d -exec chmod 755 {} \;
+# Поиск файлов с исключением определенных путей
+find ./ -path ./subpath -prune -o -name 'index.md' -ls
+# Установить права ACL (Access Control List) для пользователя
+setfacl -m u:ivan:rwx /opt/mydata
+# Разрешить цепочку символических ссылок до конечного файла
+current="/path/to/symlinks"; while [[ -L "$current" ]]; do target=$(readlink "$current"); echo "$current -> $target"; if [[ "$target" == /* ]]; then current="$target"; else current="$(dirname "$current")/$target"; fi; done; echo "Final: $current"
+# Найти открытые файлы, которые были удалены (но все еще используются)
+lsof | grep '(deleted)'
+# Усечь (очистить) содержимое удаленного, но открытого файла
+truncate -s 0 /proc/<PID>/fd/<FD>
+
+## ======================
+## Архивирование и сжатие
+## ======================
+# Создать файл со случайными данными
+dd if=/dev/urandom of=./file1 bs=50K count=10
+# Создать второй файл со случайными данными
+dd if=/dev/urandom of=./file2 bs=50K count=10
+# Создать tar-архив из файлов и директорий
+tar -c -f ./archive.tar ./file1 ./file2 ./dir/
+# Создать tar-архив с подробным выводом
+tar -v -c -f ./archive.tar ./file1 ./file2 ./dir/
+# Создать tar-архив, находясь в другой директории
+tar -C /tmp/dir/ -c -f ./archive.tar ./
+# Извлечь содержимое tar-архива
+tar -x -f ./archive.tar
+# Извлечь tar-архив в указанную директорию
+tar -C /tmp/dir/ -x -f ./archive.tar
+# Показать список файлов в tar-архиве
+tar -t -f ./archive.tar
+# Проверить целостность tar-архива
+tar -t -f ./archive.tar &> /dev/null
+# Добавить файл к существующему tar-архиву
+tar -r -f ./archive.tar /etc/passwd
+# Удалить файл из tar-архива
+tar --delete -f archive.tar etc/passwd
+# Создать сжатый gzip tar-архив (.tgz или .tar.gz)
+tar -c -z -f ./archive.tar.gz ./file1 ./file2
+# Создать сжатый bzip2 tar-архив (.tar.bz2)
+tar -c -j -f archive.tar.bz2 ./file1.txt ./file2.txt
+# Создать сжатый xz tar-архив (.tar.xz)
+tar -c -J -f archive.tar.xz ./file1.txt ./file2.txt
+# Создать сжатый zstd tar-архив (.tar.zst)
+tar -c --zstd -f archive.tar.zst ./file1.txt ./file2.txt
+# Создать zstd-архив с максимальным сжатием (через внешний zstd)
+tar -I "zstd -19" -cvf ./archive.tzst ./file* ./dir
+# Создать архив с указанием внешней утилиты сжатия
+tar -v -I "zstd -19" -c -f ./archive.tzst ./file1.txt ./dir
+# Создать tar-архив и направить его в stdout
+tar -c -f - ./file1 ./file2 ./dir/ > ./archive.tar
+# Создать сжатый gzip tar-архив и направить его в stdout
+tar -c -z -f - ./file1 ./file2 ./dir/ > ./archive.tgz
+# Архивировать и сжать данные с помощью внешней утилиты (gzip)
+tar -c -f - ./file1 ./file2 ./dir/ | gzip -9 > ./archive.tgz
+# Архивировать файлы, найденные командой find
+find ./ -name 'file[1-2]' | tar -c -z -f ./archive.tgz -T -
+# Заархивировать, сжать и отправить файлы на удаленный хост для распаковки
+tar -c -z -f - ./dir/ | ssh ivan@test.r4ven.me "tar -C /tmp -x -z -f -"
+# Создать сжатый tar-архив на удаленном хосте и скачать его локально
+ssh ivan@test.r4ven.me "tar -c -z -f - ./file1 ./file2" > ./archive.tgz
+# Скачать и извлечь сжатый tar-архив с удаленного хоста локально
+ssh ivan@test.r4ven.me "cat ./archive.tgz" | tar -C /tmp -x -z -f -
+# Создать сжатый и зашифрованный GPG-архив
+tar -c -z -f - ./file1 ./file2 ./dir/ | gpg --batch --symmetric --passphrase "MyPassword" > ./archive.tgz.gpg
+# Расшифровать GPG-архив и извлечь его содержимое
+gpg -d ./archive.tgz.gpg | tar -x -z -f -
+# Разделить сжатый tar-архив на более мелкие части
+tar -c -z -f - ./dir/ | split -b 200K - ./archive.tgz.part-
+# Объединить разделенные части архива и извлечь его
+cat ./archive.tgz.part-* | tar -x -z -f -
+# Сжать файл с помощью gzip
+gzip ./file1.txt
+# Распаковать gzip-архив
+gunzip ./file1.txt.gz
+# Распаковать gzip-архив (альтернативно)
+gzip -d ./file1.txt.gz
+# Сжать файл, сохранив оригинал
+gzip -k ./file1.txt
+# Сжать файл с максимальным уровнем сжатия gzip
+gzip -9 ./file1.txt
+# Сжать файл с помощью bzip2
+bzip2 ./file1.txt
+# Распаковать bzip2-архив
+bunzip2 ./file1.txt.bz2
+# Распаковать bzip2-архив (альтернативно)
+bzip2 -d ./file1.txt.bz2
+# Сжать файл с помощью bzip2, сохранив оригинал
+bzip2 -k ./file1.txt
+# Сжать файл с максимальным уровнем сжатия bzip2
+bzip2 -9 ./file1.txt
+# Сжать файл с помощью xz
+xz ./file1.txt
+# Распаковать xz-архив
+unxz ./file1.txt.xz
+# Распаковать xz-архив (альтернативно)
+xz -d ./file1.txt.xz
+# Сжать файл с помощью xz, сохранив оригинал
+xz -k ./file1.txt
+# Сжать файл с максимальным уровнем сжатия xz
+xz -9 ./file1.txt
+# Сжать файл с помощью zstd
+zstd ./file1.txt
+# Сжать файл с помощью zstd, сохранив оригинал
+zstd -k ./file1.txt
+# Распаковать zstd-архив
+unzstd ./file1.txt.zst
+# Распаковать zstd-архив (альтернативно)
+zstd -d ./file1.txt.zst
+# Сжать файл с максимальным уровнем сжатия zstd
+zstd -19 ./file1.txt
+# Создать ZIP-архив из файлов и директорий
+zip ./archive.zip ./file1 ./dir/
+# Извлечь содержимое ZIP-архива
+unzip ./archive.zip
+# Показать список файлов в ZIP-архиве
+unzip -l ./archive.zip
+# Добавить файл к существующему ZIP-архиву
+zip ./archive.zip ./file2
+# Создать ZIP-архив без сжатия
+zip -0 ./archive.zip ./file1.txt
+# Создать ZIP-архив с максимальным сжатием
+zip -9 ./archive.zip ./file1.txt
+# Создать 7z-архив из файлов и директорий
+7z a ./archive.7z ./file1 ./dir/
+# Извлечь содержимое 7z-архива
+7z x ./archive.7z
+# Показать список файлов в 7z-архиве
+7z l ./archive.7z
+# Добавить файл к существующему 7z-архиву
+7z a ./archive.7z ./file2
+# Создать 7z-архив без сжатия
+7z a -mx=0 archive.7z ./file1.txt
+# Создать 7z-архив с максимальным сжатием
+7z a -mx=9 archive.7z ./file1.txt
+# Создать RAR-архив из файлов и директорий
+rar a ./archive.rar ./file1 ./dir/
+# Извлечь содержимое RAR-архива
+unrar x ./archive.rar
+# Показать список файлов в RAR-архиве
+unrar l ./archive.rar
+# Добавить файл к существующему RAR-архиву
+rar a ./archive.rar ./file2
+# Создать RAR-архив без сжатия
+rar a -m0 ./archive.rar file1.txt
+# Создать RAR-архив с максимальным сжатием
+rar a -m5 archive.rar file1.txt
+# Создать ZIP-архив для тестирования
+zip -9 ./archive.zip ./file* ./dir
+# Создать 7z-архив для тестирования
+7z a -mx=9 archive.7z ./file* ./dir
+# Создать RAR-архив для тестирования
+rar a -m5 ./archive.rar ./file* ./dir
+
+## ======================
+## Сеть и сетевые утилиты
+## ======================
+# Показать уникальные слушающие TCP/UDP порты
+ss -tuln | awk '{print $5}' | grep -Eo ':[0-9]+' | sort -t: -k2 -n -u
+# Временно запретить ответы на ICMP echo-запросы (ping)
+echo 1 | sudo tee /proc/sys/net/ipv4/icmp_echo_ignore_all
+# Начать отслеживание ICMP echo-запросов (iptables)
+iptables -A INPUT -p icmp --icmp-type echo-request -m recent --set --name PING_LIST
+# Ограничить количество ICMP echo-запросов (iptables)
+iptables -A INPUT -p icmp --icmp-type echo-request -m recent --update --seconds 10 --hitcount 5 --name PING_LIST -j DROP
+# Проверить доступность TCP-порта с помощью curl
+curl -v telnet://10.11.12.13:1234
+# Быстрая проверка доступности TCP-порта через bash
+echo > /dev/tcp/r4ven.me/443 && echo "open" || echo "unavailable"
+# Проверить доступность SSL/TLS порта с помощью openssl
+openssl s_client -connect r4ven.me:443
+# Поднять/опустить сетевой интерфейс
+sudo ip link set dev eth0 down; sudo ip link set dev eth0 up
+# Временно включить пересылку IP-пакетов (маршрутизацию)
+sysctl -w net.ipv4.ip_forward=1 net.ipv6.conf.all.forwarding=1
+# Включить пересылку IP-пакетов постоянно (через sysctl.d)
+echo -e 'net.ipv4.ip_forward = 1\nnet.ipv6.conf.all.forwarding = 1' > /etc/sysctl.d/99-forwarding.conf && sysctl -p /etc/sysctl.d/99-forwarding.conf
+# Выполнить параллельный пинг нескольких хостов
+seq 20 | xargs -P20 -I{} sh -c 'ping -c5 nftables.r4ven.me > out_{}.log 2>&1'
+# Запустить команду с определенными сетевыми возможностями (capabilities)
+sudo capsh --caps="cap_net_raw+ep" -- -c "/path/to/program"
+# Выполнить DNS-запрос (dig) и показать короткий ответ
+dig r4ven.me +short +answer +identify
+# Выполнить DNS-запрос с трассировкой делегирования
+dig r4ven.me +short +trace
+# Выполнить DNS-запрос к указанному серверу имен
+dig @8.8.8.8 r4ven.me +short +answer +identify
+# Проверить статус конкретного TCP-порта (nmap)
+nmap 10.11.12.13 -p 22
+# Проверить статус конкретного UDP-порта (nmap)
+nmap -sU 10.11.12.13 -p 53
+# Запустить простой TCP-сервер (netcat)
+while true; do echo "Listen TCP port 9999..."; nc -l -p 9999 | sed 's/.*/You say: &/'; echo "TCP-connection closed."; done
+# Запустить TCP-сервер с ответом 'pong'
+while true; do nc -l -p 12345 | tee /dev/tty | { read line; echo "pong"; } ; done
+# Запустить простой UDP-сервер (netcat)
+while true; do echo "pong" | nc -u -l -p 9999; done
+# Отправить сообщение TCP-серверу (netcat)
+echo "hello tcp" | nc -v 127.0.0.1 12345
+# Отправить сообщение UDP-серверу (netcat)
+echo "ping" | nc -u -w1 127.0.0.1 9999
+# Запустить UDP-сервер с ответом 'pong' (socat)
+socat -v UDP-RECVFROM:9999,fork SYSTEM:"echo 'pong'"
+# Запустить TCP-сервер с ответом 'pong' (socat)
+socat -v TCP-LISTEN:9999,fork SYSTEM:"echo 'pong'"
+# Отправить сообщение UDP-серверу (socat)
+echo "ping" | socat - UDP:127.0.0.1:9999
+# Отправить сообщение TCP-серверу (socat)
+echo "ping" | socat - TCP:127.0.0.1:9999
+# Создать простую веб-страницу с автообновлением (ncat)
+ncat -lk 8080 -c 'echo -e "HTTP/1.1 200 OK\nContent-Type: text/html\n\n<html><meta http-equiv=\"refresh\" content=\"1\"><pre>$(date)\nONLINE</pre></html>"'
+
+## ========
+## Nftables
+## ========
+# Очистить весь набор правил nftables
+nft "flush ruleset"
+# Добавить таблицу 'filter' в семействе 'inet'
+nft "add table inet filter"
+# Очистить все правила в таблице 'inet filter'
+nft "flush table inet filter"
+# Добавить таблицу 'nat' в семействе 'inet'
+nft "add table inet nat"
+# Очистить все правила в таблице 'inet nat'
+nft "flush table inet nat"
+# Создать набор (set) для частных IPv4-адресов LAN
+nft "add set inet filter lan4 { type ipv4_addr; flags interval; elements = { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 } }"
+# Создать набор (set) для частных IPv6-адресов LAN
+nft "add set inet filter lan6 { type ipv6_addr; flags interval; elements = { fd00::/8, fe80::/10 } }"
+# Создать набор (set) для доверенных IPv4-адресов
+nft "add set inet filter trusted { type ipv4_addr; elements = { 123.34.56.78 } }"
+# Добавить входную цепочку 'input' с политикой 'drop'
+nft "add chain inet filter input { type filter hook input priority 0; policy drop; }"
+# Добавить цепочку 'forward' с политикой 'drop'
+nft "add chain inet filter forward { type filter hook forward priority 50; policy drop; }"
+# Добавить выходную цепочку 'output' с политикой 'accept'
+nft "add chain inet filter output { type filter hook output priority -200; policy accept; }"
+# Добавить цепочку 'prerouting' для NAT
+nft "add chain inet nat prerouting { type nat hook prerouting priority dstnat; policy accept; }"
+# Добавить цепочку 'postrouting' для NAT
+nft "add chain inet nat postrouting { type nat hook postrouting priority srcnat; policy accept; }"
+# Добавить вспомогательную цепочку 'input_wan'
+nft "add chain inet filter input_wan"
+# Добавить вспомогательную цепочку 'input_lan'
+nft "add chain inet filter input_lan"
+# Добавить цепочку для логирования отбрасываемых пакетов
+nft "add chain inet filter log_drop"
+# Отбрасывать пакеты с недействительным состоянием соединения
+nft "add rule inet filter input ct state invalid drop comment \"Drop invalid connections\""
+# Разрешить установленные и связанные соединения
+nft "add rule inet filter input ct state { established, related } accept comment \"Allow established connections\""
+# Разрешить трафик через интерфейс loopback
+nft "add rule inet filter input iif lo accept comment \"Allow loopback\""
+# Разрешить входящий трафик с доверенных IP-адресов
+nft "add rule inet filter input ip saddr @trusted accept comment \"Allow trusted IPs\""
+# Ограничить скорость ICMP-трафика
+nft "add rule inet filter input meta l4proto icmp icmp type { echo-request, destination-unreachable, time-exceeded } limit rate 10/second accept comment \"ICMP rate limited\""
+# Разрешить необходимый IPv6 ICMP-трафик
+nft "add rule inet filter input meta l4proto ipv6-icmp icmpv6 type { destination-unreachable, packet-too-big, time-exceeded, parameter-problem, mld-listener-query, mld-listener-report, mld-listener-reduction, nd-router-solicit, nd-router-advert, nd-neighbor-solicit, nd-neighbor-advert, mld2-listener-report } accept comment \"Necessary IPv6 ICMP\""
+# Разрешить UDP-трассировку (traceroute)
+nft "add rule inet filter input_wan udp dport 33434-33534 reject comment \"Allow UDP traceroute\""
+# Перенаправить IPv4-трафик из LAN в цепочку 'input_lan'
+nft "add rule inet filter input ip saddr @lan4 jump input_lan comment \"LAN IPv4 processing\""
+# Перенаправить IPv6-трафик из LAN в цепочку 'input_lan'
+nft "add rule inet filter input ip6 saddr @lan6 jump input_lan comment \"LAN IPv6 processing\""
+# Перенаправить IPv4-трафик из WAN в цепочку 'input_wan'
+nft "add rule inet filter input ip saddr != @lan4 jump input_wan comment \"WAN IPv4 processing\""
+# Перенаправить IPv6-трафик из WAN в цепочку 'input_wan'
+nft "add rule inet filter input ip6 saddr != @lan6 jump input_wan comment \"WAN IPv6 processing\""
+# Перенаправить остальной входящий трафик в цепочку 'log_drop'
+nft "add rule inet filter input jump log_drop comment \"Default drop\""
+# Разрешить весь TCP/UDP трафик из LAN
+nft "add rule inet filter input_lan meta l4proto { tcp, udp } accept comment \"Allow all TCP/UDP from LAN\""
+# Разрешить определенные TCP-порты из LAN
+nft "add rule inet filter input_lan tcp dport { 80, 443 } accept comment \"Allowed TCP ports from LAN\""
+# Разрешить определенные UDP-порты из LAN
+nft "add rule inet filter input_lan udp dport { 53, 123 } accept comment \"Allowed UDP ports from LAN\""
+# Отбрасывать новые соединения из LAN с логированием
+nft "add rule inet filter input_lan ct state new jump log_drop comment \"Drop all from LAN with log\""
+# Разрешить SSH из WAN
+nft "add rule inet filter input_wan tcp dport 22 accept comment \"Allow SSH from WAN\""
+# Разрешить определенные TCP-порты из WAN
+nft "add rule inet filter input_wan tcp dport { 80, 443 } accept comment \"Allowed TCP ports from WAN\""
+# Разрешить определенные UDP-порты из WAN
+nft "add rule inet filter input_wan udp dport { 53, 123 } accept comment \"Allowed UDP ports from WAN\""
+# Разрешить DNAT для порта 443 на eth0
+nft "add rule inet filter input_wan iifname \"eth0\" tcp dport 443 accept comment \"DNAT: 443->43443\""
+# Разрешить трафик после DNAT на eth0
+nft "add rule inet filter input_wan iifname \"eth0\" ct status dnat tcp dport 43443 accept comment \"DNAT: 443->43443\""
+# Отбрасывать новые соединения из WAN с логированием
+nft "add rule inet filter input_wan ct state new jump log_drop comment \"Drop all from WAN\""
+# Разрешить установленные и связанные соединения для пересылки
+nft "add rule inet filter forward ct state established,related accept"
+# Разрешить входящую пересылку для интерфейсов K8s (cni)
+nft "add rule inet filter forward iifname \"cni*\" accept comment \"Allow K8s forward in\""
+# Разрешить исходящую пересылку для интерфейсов K8s (cni)
+nft "add rule inet filter forward oifname \"cni*\" accept comment \"Allow K8s forward out\""
+# Разрешить входящую пересылку для интерфейсов K8s (flannel)
+nft "add rule inet filter forward iifname \"flannel.*\" accept comment \"Allow K8s forward in\""
+# Разрешить исходящую пересылку для интерфейсов K8s (flannel)
+nft "add rule inet filter forward oifname \"flannel.*\" accept comment \"Allow K8s forward out\""
+# Разрешить входящую пересылку для интерфейсов K8s (Calico VXLAN)
+nft "add rule inet filter forward iifname \"vxlan.calico\" accept comment \"Allow K8s forward in\""
+# Разрешить исходящую пересылку для интерфейсов K8s (Calico VXLAN)
+nft "add rule inet filter forward oifname \"vxlan.calico\" accept comment \"Allow K8s forward out\""
+# Разрешить входящую пересылку для мостов Docker
+nft "add rule inet filter forward iifname \"br-*\" accept comment \"Allow Docker forward in\""
+# Разрешить исходящую пересылку для мостов Docker
+nft "add rule inet filter forward oifname \"br-*\" accept comment \"Allow Docker forward out\""
+# Разрешить входящую пересылку для мостов KVM/libvirt
+nft "add rule inet filter forward iifname \"virbr*\" accept comment \"Allow VMs forward in\""
+# Разрешить исходящую пересылку для мостов KVM/libvirt
+nft "add rule inet filter forward oifname \"virbr*\" accept comment \"Allow VMs forward out\""
+# Разрешить входящую пересылку для VPN-туннелей (OpenVPN/WireGuard)
+nft "add rule inet filter forward iifname \"tun*\" accept comment \"Allow OC forward in\""
+# Разрешить исходящую пересылку для VPN-туннелей (OpenVPN/WireGuard)
+nft "add rule inet filter forward oifname \"tun*\" accept comment \"Allow OC forward out\""
+# Разрешить входящую пересылку для WireGuard интерфейсов
+nft "add rule inet filter forward iifname \"wg*\" accept comment \"Allow WG forward in\""
+# Разрешить исходящую пересылку для WireGuard интерфейсов
+nft "add rule inet filter forward oifname \"wg*\" accept comment \"Allow WG forward out\""
+# Отбрасывать новые соединения для пересылки с логированием
+nft "add rule inet filter forward ct state new jump log_drop comment \"Drop all forward\""
+# Логировать отбрасываемые пакеты с ограничением скорости
+nft "add rule inet filter log_drop limit rate 5/second log prefix \"NFT-DROP: \" flags all counter comment \"Drop logging\""
+# Отклонять TCP-соединения с RST-пакетом
+nft "add rule inet filter input meta l4proto tcp reject with tcp reset comment \"Reject TCP\""
+# Отклонять UDP-пакеты
+nft "add rule inet filter input meta l4proto udp reject comment \"Reject UDP\""
+# Отклонять пакеты других протоколов с ICMP-сообщением
+nft "add rule inet filter input counter reject with icmpx type port-unreachable comment \"Reject other protocols\""
+# Защита от сканирования портов с ограничением скорости
+nft "add rule inet filter input pkttype host limit rate 5/second counter reject with icmpx type admin-prohibited comment \"Protection from port scanning\""
+# Окончательно отбросить все пакеты в цепочке log_drop
+nft "add rule inet filter log_drop drop comment \"Drop all\""
+# Настроить DNAT: перенаправить порт 443 на 43443
+nft "add rule inet nat prerouting iifname \"eth0\" tcp dport 443 redirect to 43443 comment \"DNAT: 443->43443\""
+# Настроить DNAT: перенаправить порт 443 на 43443 (альтернативный синтаксис)
+nft "add rule inet nat prerouting iifname \"eth0\" tcp dport 443 dnat to :43443 comment \"DNAT: 443->43443 \""
+# Настроить SNAT (маскарадинг) для всего исходящего трафика (кроме loopback)
+nft "add rule inet nat postrouting oifname != lo masquerade comment \"SNAT: NAT processing for all\""
+# Настроить SNAT (маскарадинг) для исходящего трафика через eth0
+nft "add rule inet nat postrouting oifname \"eth0\" masquerade comment \"SNAT: NAT procesing for eth0\""
+# Настроить SNAT (маскарадинг) для исходящего трафика через VPN-туннели
+nft "add rule inet nat postrouting oifname \"tun*\" masquerade comment \"SNAT: NAT procesing for OC\""
+# Вывести весь набор правил nftables
+nft list ruleset
+# Вывести список всех таблиц nftables
+nft list tables
+# Вывести правила конкретной таблицы (inet filter)
+nft list table inet filter
+# Вывести правила конкретной цепочки (inet filter input)
+nft list chain inet filter input
+# Вывести весь набор правил с 'handle' для каждого правила
+nft -a list ruleset
+# Очистить все таблицы и цепочки nftables
+nft flush ruleset
+# Очистить все правила в таблице 'inet filter'
+nft flush table inet filter
+# Удалить таблицу 'inet filter'
+nft delete table inet filter
+# Добавить правило: разрешить SSH на входной цепочке
+nft add rule inet filter input tcp dport 22 accept
+# Вывести правила входной цепочки с 'handle'
+nft -a list chain inet filter input
+# Удалить правило из цепочки по его 'handle'
+nft delete rule inet filter input handle 15
+# Заменить правило в цепочке по его 'handle'
+nft replace rule inet filter input handle 15 tcp dport 2222 accept
+# Загрузить правила nftables из файла
+nft -f /etc/nftables.conf
+# Проверить синтаксис файла правил nftables
+nft -c -f /etc/nftables.conf
+# Сохранить текущий набор правил nftables в файл
+nft -s list ruleset > /etc/nftables.conf
+# Мониторинг событий nftables в реальном времени
+nft monitor
+# Трассировка прохождения пакетов через правила nftables
+nft monitor trace
+# Загрузить правила с отладочной информацией netlink
+nft --debug=netlink -f myrules.nft
+# Заменить существующее правило nftables по его 'handle' (из раздела "Сеть")
+sudo nft replace rule inet filter input handle 23 'tcp dport 2222 accept comment "Allow SSH"'
+# Просмотреть логи nftables в реальном времени (из раздела "Сеть")
+sudo journalctl -k -f -g 'NFT-DROP'
+
+## ==============
+## Захват пакетов
+## ==============
+# Захват пакетов для конкретного хоста и порта
+tcpdump -i any -nn -q dst host 10.11.12.13 and dst port 443
+# Захват пакетов и сохранение их в pcap-файл
+sudo tcpdump -nn -i any host 10.11.12.13 -w ./tcpdump.pcap
+# Захват пакетов и вывод их в текстовый файл
+sudo tcpdump -nn -i any host 10.11.12.13 >> ./tcpdump.txt
+# Просмотр содержимого pcap-файла
+sudo tcpdump -qns 0 -X -r ./tcpdump.pcap | less
+
+## ========================
+## Шифрование и сертификаты
+## ========================
+# Зашифровать tar-архив с помощью OpenSSL (AES-256-CBC)
+tar -czf - /var/log/apt | openssl enc -aes-256-cbc -pbkdf2 -e -out ./logs.tar.gz.enc
+# Расшифровать файл, зашифрованный OpenSSL
+openssl enc -aes-256-cbc -pbkdf2 -d -in ./logs.tar.gz.enc -out ./logs.tar.gz
+# Проверить SSL/TLS-соединение с сервером
+openssl s_client -connect r4ven.me:443
+# Получить и отобразить удаленный SSL/TLS-сертификат
+openssl s_client -connect r4ven.me:443 < /dev/null 2> /dev/null | openssl x509 -text
+# Получить удаленный SSL/TLS-сертификат с указанием ServerName
+openssl s_client -connect r4ven.me:443 -servername r4ven.me < /dev/null 2>/dev/null | openssl x509 -text
+# Просмотреть содержимое локального X.509 сертификата
+openssl x509 -in ./ca-cert.crt -text -noout
+# Сгенерировать самоподписанный SSL/TLS-сертификат
+openssl req -x509 -nodes -days 7300 -newkey rsa:4096 -keyout ./example.com.key -out ./example.crt -subj "/C=RU/ST=Moscow/L=Moscow/O=Example/OU=TEST/CN=example.com"
+# Получить MD5-хеш модуля открытого ключа сертификата
+openssl x509 -noout -modulus -in /var/lib/kubelet/pki/kubelet.crt | openssl md5
+# Получить MD5-хеш модуля закрытого ключа
+openssl rsa -noout -modulus -in /var/lib/kubelet/pki/kubelet.key | openssl md5
+# Создать локальные доверенные TLS-сертификаты с mkcert
+mkcert -cert-file jenkins.local.pem -key-file jenkins.local-key.pem "jenkins.local" "localhost" "127.0.0.1"
+# Вывести список доверенных корневых сертификатов (RHEL/CentOS)
+openssl crl2pkcs7 -nocrl -certfile /etc/pki/tls/certs/ca-bundle.crt | openssl pkcs7 -print_certs -text | grep "Subject:"
+# Вывести список доверенных корневых сертификатов (Debian/Ubuntu)
+openssl crl2pkcs7 -nocrl -certfile /etc/ssl/certs/ca-certificates.crt | openssl pkcs7 -print_certs -text | grep "Subject:"
+# Добавить новый доверенный сертификат в систему (RHEL/CentOS)
+cp ./org_name.crt /etc/pki/ca-trust/source/anchors/org_name.crt | update-trust extract
+# Добавить новый доверенный сертификат в систему (Debian/Ubuntu)
+cp ./org_name.crt /usr/local/share/ca-certificates/org_name.crt | update-ca-certificates
+# Вывести список доверенных организаций из системного хранилища
+trust list | less
+# Зашифровать файл симметричным ключом с помощью GPG
+gpg --batch --passphrase-file /path/to/password_file --symmetric --cipher-algo AES256 example.txt
+
+## ==================
+## Веб-взаимодействие
+## ==================
+# Скачать файл по URL с помощью curl
+curl -fsSL https://raw.githubusercontent.com/r4ven-me/dots/main/.zshrc -o ~/.zshrc
+# Выполнить HTTP-запрос с трассировкой сетевого взаимодействия
+curl --trace-ascii trace.txt r4ven.me
+# Показать все хосты, к которым подключался curl (включая редиректы)
+curl -s -L -v https://example.com 2>&1 | grep 'Connected to'
+# Отправить текстовое сообщение в Telegram через Bot API
+curl -s -X POST -H 'Content-Type: application/json' -d '{"chat_id": "'"$TG_CHAT_ID"'", "text": "'"${item}: $message"'", "parse_mode": "Markdown"}' "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage"
+# Отправить файл в Telegram через Bot API
+curl -s -X POST -F "chat_id=${TG_CHAT_ID}" -F "document=@${FILE_PATH}" -F "caption=${CAPTION_TEXT}" -F "parse_mode=Markdown" "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendDocument"
+# Активировать универсальный вебхук Jenkins для Git-события
+curl -L -X POST -H "Content-Type: application/json" -d '{"ref":"refs/heads/main","repository":{"full_name":"test/repo"}}' "http://jenkins.example.com/generic-webhook-trigger/invoke?token=12345qwerty"
+
+## =====================
+## Пользователи и группы
+## =====================
+# Добавить новую системную группу
+addgroup --system --gid 1995 zabbix
+# Добавить нового системного пользователя (без пароля и оболочки)
+adduser --system --gecos 'Zabbix monitoring system' --disabled-password --uid 1997 --ingroup zabbix --shell /sbin/nologin --home /opt/zabbix/zabbix_data zabbix
+
+## =======
+## Systemd
+## =======
+# Отредактировать файл юнита systemd (создаст override)
+systemctl edit --full --force unitname.service
+# Показать свойства системного среза (slice)
+systemctl show system.slice
+# Показать все параметры и статус юнита systemd
+systemctl show unit_name
+# Проверить, активен ли юнит systemd
+systemctl is-active --quiet cron
+# Перезапустить юнит systemd с включенным отладочным логированием
+sudo SYSTEMD_LOG_LEVEL=debug systemctl restart systemd-networkd
+# Вывести иерархию cgroups, управляемых systemd (альтернативно)
+sudo systemd-cgls
+# Показать максимальный лимит памяти для юнита systemd
+systemctl show unitname.service -p MemoryMax
+# Установить или изменить лимит памяти для юнита systemd
+systemctl set-property unitname.service MemoryMax=2G
+# Показать использование ресурсов cgroups в стиле top
+sudo systemd-cgtop -d 3
+
+## ============================
+## Производительность и отладка
+## ============================
+# Мониторинг производительности CPU в реальном времени (perf top)
+perf top
+# Получить сводную статистику производительности для программы
+perf stat ./your_program
+# Записать данные профилирования выполнения программы
+perf record -g ./your_program
+# Записать данные профилирования для запущенного процесса
+perf record -g -p $(pidof your_program)
+# Анализировать записанные данные профилирования (perf report)
+perf report ./perf.data
+# Тестирование скорости записи на диск
+sync; dd if=/dev/zero of=tempfile bs=1M count=1024; sync
+# Тестирование скорости чтения с диска (с очисткой кеша)
+sysctl -w vm.drop_caches=3 && dd if=tempfile of=/dev/null bs=1M count=1024
+# Трассировать системные вызовы выполняемой команды
+strace -f -e execve ls -l
+# Присоединиться к запущенному процессу и трассировать его системные вызовы
+strace -p 123
+# Вывести переменные окружения запущенного процесса
+sudo cat /proc/<pid>/environ | xargs -0 -n1
+
+## ===
+## SSH
+## ===
+# Сгенерировать SSH-ключ Ed25519 без запроса парольной фразы
+ssh-keygen -q -N "" -t ed25519 -f ~/.ssh/id_ed25519_test
+# Изменить комментарий к существующему SSH-ключу
+ssh-keygen -c -f ~/.ssh/id_ed25519_test
+# Вывести публичную часть SSH-ключа из приватного файла
+ssh-keygen -y -f ~/.ssh/id_ed25519
+# Скопировать публичный SSH-ключ на удаленный хост
+ssh-copy-id -i ~/.ssh/id_ed25519 user@host
+# Настроить локальное перенаправление портов SSH
+ssh -q -f -N -L 127.0.0.1:5432:localhost:5432 ivan@test.r4ven.me
+# Настроить временное локальное перенаправление портов SSH
+ssh -q -f -L 127.0.0.1:5432:localhost:5432 ivan@test.r4ven.me sleep 60
+# Полное временное локальное перенаправление портов SSH с опциями
+ssh -q -f -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ExitOnForwardFailure=yes -L 127.0.0.1:5432:localhost:5432 test.r4ven.me -p 2222 -l ivan -i ~/.ssh/id_ed25519_test sleep 60
+# Настроить обратное (удаленное) перенаправление портов SSH
+ssh -q -f -N -R 127.0.0.1:4443:localhost:5001 ivan@test.r4ven.me
+# Удалить запись хоста из файла known_hosts
+ssh-keygen -f ~/.ssh/known_hosts -R 192.168.1.31
+# Синхронизировать файлы и директории по SSH с помощью rsync
+rsync --archive --compress --links --hard-links --xattrs --human-readable --delete -e "ssh -q -o StrictHostKeyChecking=no  -o UserKnownHostsFile=/dev/null -p 2222 -l test" "/path/to/local/source" r4ven.me:"/path/to/remote/destination/"
+
+## ===========
+## Базы данных
+## ===========
+# Получить статус репликасета MongoDB
+mongo -u root -p "$(awk -F'"' '/auth/ {print $4}' "$MONGO_SHELL")" --eval "rs.status()"
+# Подсчитать количество первичных узлов в репликасете MongoDB
+mongo --quiet -u root -p "$(awk -F'"' '/auth/ {print $4}' "$MONGO_SHELL")" --eval "rs.status().members.filter(m => m.stateStr === 'PRIMARY').length"
+# Подсчитать количество вторичных узлов в репликасете MongoDB
+mongo --quiet -u root -p "$(awk -F'"' '/auth/ {print $4}' "$MONGO_SHELL")" --eval "rs.status().members.filter(m => m.stateStr === 'SECONDARY').length"
+# Подсчитать количество нездоровых узлов в репликасете MongoDB
+mongo --quiet -u root -p "$(awk -F'"' '/auth/ {print $4}' "$MONGO_SHELL")" --eval "rs.status().members.filter(m => m.health !== 1).length"
+# Проверить успешность подключения к MongoDB и статус репликасета
+mongo --quiet -u root -p "$(awk -F'"' '/auth/ {print $4}' "$MONGO_SHELL")" --eval "rs.status().ok"
+# Проверить задержку репликации MongoDB (более 30 секунд)
+mongo --quiet -u root -p "$(awk -F'"' '/auth/ {print $4}' "$MONGO_SHELL")" --eval 'var s = rs.status(); var p = s.members.find(m=>m.stateStr==="PRIMARY").optimeDate; var bad = s.members.filter(m => m.stateStr==="SECONDARY" && Math.abs(p - m.optimeDate) > 30000).length; print(bad);'
+# Создать файл .pgpass для автоматической аутентификации PostgreSQL
+echo 'localhost:5432:mydb:myuser:mypassword' > ~/.pgpass && chmod 0600 ~/.pgpass
+# Войти в консоль PostgreSQL как пользователь postgres
+sudo -u postgres psql -U postgres
+# Установить или изменить пароль пользователя PostgreSQL
+ALTER USER postgres WITH PASSWORD 'your_new_password'\;
+
+## =================================
+## Виртуализация (QEMU/KVM, Proxmox)
+## =================================
+# Установить необходимые инструменты для работы с QCOW2 (qemu-utils, libguestfs-tools)
+
+apt install -y qemu-utils libguestfs-tools
+# Скачать облачный образ QCOW2 Debian 13
+curl https://cloud.debian.org/images/cloud/trixie/latest/debian-13-generic-amd64.qcow2 -o debian-13-generic-amd64.qcow2
+# Изменить размер QCOW2-образа диска
+qemu-img resize ./debian-13-generic-amd64.qcow2 20G
+# Настроить QCOW2-образ (обновление, установка пакетов, локали)
+virt-customize -a debian-13-generic-amd64.qcow2 --update --install qemu-guest-agent,locales,zsh,git,curl,neovim,bat,eza,fzf,grc --run-command "echo 'en_US.UTF-8 UTF-8' >> /etc/locale.gen" --run-command "echo 'ru_RU.UTF-8 UTF-8' >> /etc/locale.gen" --run-command "locale-gen"
+# Установить права доступа и владельца для файла
+chmod 640 /tmp/.zshrc && chown root: /tmp/.zshrc
+# Скопировать файл с хоста в QCOW2-образ
+virt-copy-in -a ./debian-13-generic-amd64.qcow2 /host/path /guest/path
+# Редактировать файл внутри QCOW2-образа
+virt-edit -a ./debian-13-generic-amd64.qcow2 /guest/path
+# Смонтировать QCOW2-образ диска
+guestmount -i -a ./debian-13-generic-amd64.qcow2 /mnt/qcow2
+# Размонтировать QCOW2-образ диска
+guestunmount /mnt/qcow2
+# Запустить интерактивную оболочку guestfish для QCOW2-образа
+guestfish -i -a ./debian-13-generic-amd64.qcow2
+# Выполнить команду shell внутри QCOW2-образа (через guestfish)
+sh 'grep root /etc/passwd'
+# Вывести содержимое директории внутри QCOW2-образа
+virt-ls -a ./debian-13-generic-amd64.qcow2 /path
+# Просмотреть содержимое файла внутри QCOW2-образа
+virt-cat -a ./debian-13-generic-amd64.qcow2 /path/to/file
+# Скопировать файл из QCOW2-образа на хост
+virt-copy-out -a ./debian-13-generic-amd64.qcow2 /guest/path /host/path
+# Создать tar-архив из содержимого директории внутри QCOW2-образа
+virt-tar-out -a ./debian-13-generic-amd64.qcow2 /path /host/archive.tar
+# Извлечь tar-архив в директорию внутри QCOW2-образа
+virt-tar-in -a ./debian-13-generic-amd64.qcow2 ./archive.tar /guest/path
+# Вывести список файловых систем внутри QCOW2-образа
+virt-filesystems -a ./debian-13-generic-amd64.qcow2
+# Извлечь ядро Linux из QCOW2-образа
+virt-get-kernel -a ./debian-13-generic-amd64.qcow2
+# Прочитать системные логи из QCOW2-образа
+virt-log -a ./debian-13-generic-amd64.qcow2
+# Получить информацию об операционной системе внутри QCOW2-образа
+virt-inspector -a ./debian-13-generic-amd64.qcow2
+# Показать использование дискового пространства внутри QCOW2-образа
+virt-df -a ./debian-13-generic-amd64.qcow2
+# Создать образ виртуальной машины с помощью virt-builder
+virt-builder <os-name>
+# Управлять репозиторием образов для virt-builder
+virt-builder-repository
+# Настроить QCOW2-образ (установка пакетов, добавление SSH-ключа)
+virt-customize -a ./debian-13-generic-amd64.qcow2 --install vim --ssh-inject root:file:id_rsa.pub
+# Подготовить QCOW2-образ для развертывания (очистка, обнуление)
+virt-sysprep -a ./debian-13-generic-amd64.qcow2
+# Уменьшить размер QCOW2-образа, удаляя пустые блоки
+virt-sparsify ./debian-13-generic-amd64.qcow2 <out.qcow2>
+# Изменить размер разделов внутри QCOW2-образа
+virt-resize --expand /dev/sda1 in.qcow2 out.qcow2
+# Установить libguestfs-tools для управления образами в Proxmox
+apt update && apt install -y libguestfs-tools
+# Скачать облачный образ Debian 13 QCOW2
+curl https://cloud.debian.org/images/cloud/trixie/latest/debian-13-generic-amd64.qcow2 -o debian-13-generic-amd64.qcow2
+# Изменить размер QCOW2-образа для использования в Proxmox
+qemu-img resize ./debian-13-generic-amd64.qcow2 20G
+# Создать новую виртуальную машину в Proxmox
+qm create 7777 --name "debian13-k8s-template" --memory 2048 --cores 2 --net0 virtio,bridge=vmbr0
+# Импортировать QCOW2-образ как диск для ВМ Proxmox
+qm importdisk 7777 ./debian-13-generic-amd64.qcow2 storage --format qcow2
+# Подключить импортированный диск к ВМ как SCSI-устройство
+qm set 7777 --scsihw virtio-scsi-single --scsi0 storage:7777/vm-7777-disk-0.qcow2
+# Установить порядок загрузки ВМ Proxmox
+qm set 7777 --boot order=scsi0
+# Добавить виртуальный диск для Cloud-Init в ВМ
+qm set 7777 --ide0 storage:cloudinit
+# Включить последовательную консоль для ВМ Proxmox
+qm set 7777 --serial0 socket --vga serial0
+# Включить QEMU Guest Agent для ВМ
+qm set 7777 --agent enabled=1
+# Конвертировать ВМ Proxmox в шаблон
+qm template 7777
+# Пересканировать конфигурацию ВМ Proxmox
+qm rescan --vmid 7777
+# Показать полную конфигурацию ВМ Proxmox
+qm config 7777
+# Добавить новую роль пользователя в Proxmox (pveum)
+pveum role add TFUser -privs "Pool.Allocate VM.Console VM.Allocate VM.Clone VM.Config.CDROM VM.Config.CPU VM.Config.Cloudinit VM.Config.Disk VM.Config.HWType VM.Config.Memory VM.Config.Network VM.Config.Options VM.Audit VM.PowerMgmt VM.GuestAgent.Audit Datastore.AllocateSpace Datastore.Allocate Datastore.Audit SDN.Use"
+# Добавить нового пользователя в Proxmox (pveum)
+pveum user add tfuser@pve
+# Назначить роль пользователю Proxmox
+pveum aclmod / -user tfuser@pve -role TFUser
+# Создать токен API для пользователя Proxmox
+pveum user token add tfuser@pve tf --privsep 0
+
+## =============================================
+## Инфраструктура как код (OpenTofu / Terraform)
+## =============================================
+# Инициализировать рабочую директорию OpenTofu с обновлением модулей
+tofu init -upgrade
+# Проверить синтаксис и логику конфигурации OpenTofu
+tofu validate
+# Перенастроить бэкенд OpenTofu с новыми параметрами
+tofu init -reconfigure -backend-config="path=./dev.tfstate"
+# Сгенерировать план выполнения изменений OpenTofu
+tofu plan -var-file=./dev.tfvars
+# Создать план выполнения и сохранить его в файл
+tofu plan -var-file=./dev.tfvars -out ./dev.tfplan
+# Просмотреть сохраненный файл плана OpenTofu
+tofu show ./dev.tfplan
+# Применить изменения, описанные в конфигурации OpenTofu
+tofu apply -var-file=./dev.tfvars
+# Применить изменения с указанным уровнем параллелизма
+tofu apply -var-file=./dev.tfvars -parallelism=2
+# Уничтожить все ресурсы, управляемые конфигурацией OpenTofu
+tofu destroy -var-file=./dev.tfvars
+# Проверить, соответствуют ли файлы OpenTofu стандартному форматированию
+tofu fmt -check
+# Автоматически форматировать файлы конфигурации OpenTofu
+tofu fmt
+# Рекурсивно форматировать файлы конфигурации OpenTofu
+tofu fmt -recursive
+# Включить отладочное логирование для OpenTofu (DEBUG уровень)
+export TF_LOG="DEBUG"
+# Установить путь для файла логов OpenTofu
+export TF_LOG_PATH="tofu.log"
+# Отслеживать логи OpenTofu в реальном времени
+tail -f ./tofu.log
+# Отключить отладочное логирование OpenTofu
+unset TF_LOG TF_LOG_PATH
+
+## ==========================================
+## Контейнеризация (Docker, Kubernetes, Helm)
+## ==========================================
+# Создать кастомную Docker-сеть типа bridge
+docker network create --opt com.docker.network.bridge.name=br-monitoring --opt com.docker.network.enable_ipv6=false --driver bridge --subnet 172.22.22.0/24 --gateway 172.22.22.1 monitoring_network
+# Запустить контейнер и подключить его к существующей сети
+docker run -it --rm --network swarm_network alpine sh
+# Собрать Docker-образ из Dockerfile
+docker build -t r4venme/test .
+# Собрать мультиархитектурный Docker-образ с Buildx
+docker buildx create --use && docker buildx build --platform linux/amd64,linux/arm64,linux/arm/v7 -t r4venme/test:1.0 ./
+# Запустить контейнер с сетевыми утилитами, используя ресурсы другого контейнера
+docker run --rm -it --network=container:test --pid container:test wbitt/network-multitool:alpine-extra bash
+# Анализировать содержимое Docker-образа с помощью Dive
+docker run --rm -it -v /var/run/docker.sock:/var/run/docker.sock wagoodman/dive:latest nginx:1.29
+# Получить информацию о различных объектах Kubernetes в namespace
+kubectl -n name_space get pods,svc,pvc,sts,pv -o wide
+# Показать метки (labels) для всех узлов Kubernetes
+kubectl get nodes --show-labels
+# Принудительно удалить все ресурсы в указанном namespace
+kubectl delete all --all -n name_space --force --grace-period=0
+# Проверить синтаксис YAML-манифеста на стороне клиента
+kubectl apply --dry-run=client -f your-manifest.yaml
+# Проверить манифест с API-сервером Kubernetes без применения изменений
+kubectl apply --dry-run=server -f your-manifest.yaml
+# Добавить внешний репозиторий Helm-чартов
+helm repo add gitea-charts https://dl.gitea.com/charts/
+# Поиск чартов в добавленном репозитории Helm
+helm search repo gitea-charts
+# Скачать и распаковать Helm-чарт
+helm pull gitea-charts/gitea --untar
+
+## ==========================
+## Управление версиями (Git)
+## ==========================
+# Инициализировать новый Git-репозиторий и добавить удаленный origin
+git init --initial-branch=main && git remote add origin ssh://git@github.com/r4ven-me/reponame.git
+# Инициализировать Git-репозиторий с настройкой пользователя и origin
+git init --initial-branch=main && git config user.name "Ivan Cherniy" && git config user.email "kar-kar@r4ven.me" && git remote add origin ssh://git@github.com/r4ven-me/reponame.git
+# Добавить, закоммитить и отправить изменения в удаленный репозиторий
+git add . && git commit -m 'upd' && git push
+# Показать красивый, графический лог Git
+git log --pretty=format:"%h %ad | %s%d [%an]" --graph --date=short
+# Создать файлы .gitkeep в пустых директориях репозитория
+find /path/to/repo/ -type d -empty -exec touch {}/.gitkeep \;
+
+## =======================
+## Автоматизация (Ansible)
+## =======================
+# Вывести текущий инвентарь Ansible
+ansible-inventory --list
+# Собрать факты о системе для указанного хоста
+ansible debian12-vpn -m setup -a 'filter=os_family,distribution_version'
+# Запустить плейбук Ansible с передачей дополнительных переменных
+ansible-playbook playbook.yml -e 'user_name=root' -e 'user_home=/root'
+# Выполнить команду shell на удаленном хосте через Ansible
+ansible debian12-vpn -b -m shell -a 'systemctl start service_name'
+
+## ==========================
+## Разное / Системные утилиты
+## ==========================
+# Вывести информацию о логических томах LVM и снимках
+lvs --options lv_name,lv_size,origin,lv_attr
+# Добавить новое задание в crontab текущего пользователя
+{ crontab -l; echo "0 3 * * 0 ls -l &> dirs.txt"; } | crontab -
+# Принудительная перезагрузка системы через SysRq
+echo b > /proc/sysrq-trigger
+# Вывести справку по Magic SysRq Key
+echo h > /proc/sysrq-trigger; grep 'sysrq: HELP' /var/log/kern.log
+# Включить (активировать) определенное ядро CPU
+echo 1 > /sys/devices/system/cpu/cpu2/online
+# Перенаправить весь вывод скрипта в syslog и файл с временными метками
+exec > >(tee >(logger -t $(basename "${BASH_SOURCE[0]}")) | while IFS= read -r line; do echo "$(date +"[%Y-%m-%d %H:%M:%S.%3N]") - $line"; done | tee -a "${BASH_SOURCE[0]%.*}.log") 2>&1
+# Сгенерировать случайную буквенно-цифровую строку длиной 8 символов
+cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 8 | head -n 1
+# Показать все 256 цветов переднего плана терминала
+for i in {0..255}; do printf "\e[38;5;%sm%03d " "$i" "$i"; (( (i + 1) % 16 == 0 )) && printf "\e[0m\n"; done; printf "\e[0m\n"
+# Показать все 256 цветов заднего плана терминала
+for i in {0..255}; do printf "\e[48;5;${i}m %03d \e[0m" $i; [ $((($i+1)%8)) -eq 0 ] && echo; done
+# Вывести только команды из истории bash (без номеров и даты)
+history | cut -c 26-
+# Проверить доступность Zabbix-агента на хосте
+zabbix_get -s 192.168.1.100 -p 10050 -k agent.ping
+# Скачать пример конфигурации .zshrc
+curl -fsSL https://raw.githubusercontent.com/r4ven-me/dots/main/.zshrc --output /tmp/.zshrc

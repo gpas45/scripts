@@ -40,11 +40,11 @@ $pArgs = @{
 
 # Установка модулей (если не установлены)
 if (!(Get-Module -Name Posh-ACME -ListAvailable)) {
-    Write-Host "”станавливаем Posh-ACME..."
+    Write-Host "Устанавливаем Posh-ACME..."
     Install-Module -Name Posh-ACME -Scope CurrentUser -Force
 }
 if (!(Get-Module -Name Posh-ACME.Deploy -ListAvailable)) {
-    Write-Host "”станавливаем Posh-ACME.Deploy..."
+    Write-Host "Устанавливаем Posh-ACME.Deploy..."
     Install-Module -Name Posh-ACME.Deploy -Scope CurrentUser -Force
 }
 

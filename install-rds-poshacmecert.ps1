@@ -11,8 +11,8 @@ function Write-ToEventLog {
 }
 
 # Параметры
-$certNames = 'rds.vash-profbuh.ru'
-$email     = 'gpas@dioservice.ru'
+$certNames = 'example.com'
+$email     = 'info@example.com'
 $env:POSHACME_HOME = 'C:\poshacme'
 
 # Регистрация источника в журнале событий (требует прав администратора)

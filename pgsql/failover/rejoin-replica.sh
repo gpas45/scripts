@@ -6,17 +6,14 @@ set -euo pipefail
 # === НАСТРОЙКИ ===
 LOG="/var/log/postgresql/rejoin.log"
 DATA_DIR="/var/lib/pgpro/std-12/data"
-PEER_IP="195.117.117.32"       # IP предполагаемого мастера 32/31 в зависимости от того на какой ноде висит скрипт
+PEER_IP="192.0.2.32"           # IP второго узла (предполагаемого мастера) — замените на свой
 REPL_USER="replicator"
-PASSWORD="replicate"
 PORT="5432"
 
-MAX_ATTEMPTS=3
-RETRY_DELAY=5
-STARTUP_TIMEOUT=20
-ROLE_CHECK_ATTEMPTS=5
-ROLE_CHECK_DELAY=5
-
+# Пароль репликации в скрипте не хранится. Создайте файл ~postgres/.pgpass
+# (владелец postgres, права 600) со строкой:
+#   <PEER_IP>:5432:*:replicator:<пароль>
+# psql и pg_basebackup подхватят его автоматически.
 
 sleep 100 # указывается для второго сервера, что бы не допустить одновременного поднятия двух мастеров  
 
@@ -31,7 +28,6 @@ echo "[$(date)] === STARTING SMART REJOIN ==="
 is_master() {
     local ip=$1
     if runuser -l postgres -c "
-        export PGPASSWORD='$PASSWORD';
         psql -h '$ip' -U '$REPL_USER' -p '$PORT' -d 'postgres' -Atc 'SELECT pg_is_in_recovery();'
     " 2>/dev/null | grep -q "^f$"; then
         return 0  # Это мастер
@@ -100,7 +96,6 @@ become_replica() {
 
     echo "[$(date)] Running pg_basebackup from $PEER_IP..."
     if ! runuser -l postgres -c "
-        export PGPASSWORD='$PASSWORD';
         pg_basebackup \
             -h '$PEER_IP' \
             -p '$PORT' \

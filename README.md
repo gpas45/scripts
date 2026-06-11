@@ -40,10 +40,10 @@ zabbix/    Шаблоны Zabbix
 | Скрипт | Назначение |
 |---|---|
 | `pg_setup.sh` | Установка и первичная настройка Postgres Pro 1C на Debian/Ubuntu: локали, часовой пояс, репозиторий, initdb с `--tune=1c`, pg_hba, пароль postgres. Параметры: `--pgver`, `--timezone`, `--lang`, `--postgres-pass`. Запуск от root. |
-| `backup-db-1c.sh` | Бэкап (pg_dump + pigz) и обслуживание (vacuumdb/reindexdb) баз Postgres Pro 1C по списку из файла. Ротация старых копий. Для cron. |
-| `backup-db-pgsql.sh` | То же для ванильного PostgreSQL (бинарники из `/usr/bin`). |
+| `backup-db.sh` | Бэкап (pg_dump + pigz, с проверкой целостности архива) и обслуживание (vacuumdb) баз PostgreSQL / Postgres Pro по списку из файла. Ротация бэкапов отдельно по каждой БД, логов — по возрасту. Для cron. |
+| `backup-pg.conf.example` | Пример конфига для `backup-db.sh` (копируется в `/etc/backup-pg.conf`): пути, retention, каталог бинарников. |
 
-Зависимости бэкап-скриптов: `pigz`. Список баз — текстовый файл (по умолчанию `/var/lib/pgpro/scripts/DB`), по одной базе на строку.
+Зависимости `backup-db.sh`: `pigz`. Список баз — текстовый файл (по умолчанию `/var/lib/pgpro/scripts/DB`), по одной базе на строку, `#` — комментарий.
 
 ### pgsql/failover/
 
@@ -56,7 +56,7 @@ zabbix/    Шаблоны Zabbix
 | `promote-standby.sh` | Повышение реплики до мастера (вызывается keepalived через `notify_master`). |
 | `rejoin-replica.sh` | При старте узла: если второй узел — живой мастер, пересоздаёт себя как реплику через `pg_basebackup`; иначе повышается до мастера. |
 
-> ⚠️ Перед использованием замените в конфигах и скриптах IP-адреса, пароль keepalived и учётные данные репликации на свои (пароль репликации — через `~postgres/.pgpass`, права 600).
+> ⚠️ Перед использованием замените в конфигах и скриптах IP-адреса (указаны примеры из 192.0.2.0/24) и пароль keepalived на свои. Пароль репликации в скриптах не хранится — создайте `~postgres/.pgpass` (права 600) со строкой `<IP второго узла>:5432:*:replicator:<пароль>`.
 
 ## routeros/
 
@@ -97,5 +97,5 @@ zabbix/    Шаблоны Zabbix
 
 GitHub Actions прогоняет линтеры на каждый push и pull request:
 
-- **shellcheck** для всех `*.sh` (порог — ошибки);
+- **shellcheck** для всех `*.sh` (порог — предупреждения);
 - **PSScriptAnalyzer** для всех `*.ps1` (порог — ошибки).

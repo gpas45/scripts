@@ -23,7 +23,7 @@ then
    echo "-- CHR image is available."
 else
    echo "-- Downloading CHR $version image file."
-   cd /root/temp
+   cd /root/temp || exit 1
    echo "---------------------------------------------------------------------------"
    wget https://download.mikrotik.com/routeros/$version/chr-$version.img.zip
    unzip chr-$version.img.zip

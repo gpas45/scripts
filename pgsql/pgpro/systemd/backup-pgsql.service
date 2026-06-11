@@ -1,0 +1,13 @@
+[Unit]
+Description=Backup and maintenance PosrgeSQL DB
+Requires=postgrespro-1c-16.service
+After=postgrespro-1c-16.service
+
+[Service]
+Type=oneshot
+ExecStart=/var/lib/pgpro/_backup/scripts/backup-db-pgsql.sh
+User=postgres
+Environment="PATH=/sbin:/bin:/usr/sbin:/usr/bin"
+
+[Install]
+WantedBy=multi-user.target

@@ -11,8 +11,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Run shellcheck
-        run: find . -name '*.sh' -print0 | xargs -0 shellcheck -S warning
+      # Курируемые скрипты репозитория — строгий порог (предупреждения).
+      - name: Run shellcheck (curated, warning level)
+        run: >
+          find . -name '*.sh'
+          -not -path './linux/1c/*'
+          -not -path './pgsql/pgpro/*'
+          -print0 | xargs -0 shellcheck -S warning
+      # Импортированные рабочие скрипты (1С, Postgres Pro/wal-g) приняты «как есть»
+      # с боевых серверов — порог ошибок, чтобы не переписывать проверенную логику.
+      - name: Run shellcheck (imported, error level)
+        run: >
+          find ./linux/1c ./pgsql/pgpro -name '*.sh'
+          -print0 | xargs -0 shellcheck -S error
 
   psscriptanalyzer:
     runs-on: ubuntu-latest

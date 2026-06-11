@@ -1,0 +1,8 @@
+[Unit]
+Description=Backup and maintenance PosrgeSQL DB
+
+[Timer]
+OnCalendar=*-*-* 01:15:00
+
+[Install]
+WantedBy=timers.target

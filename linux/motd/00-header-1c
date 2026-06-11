@@ -1,0 +1,121 @@
+#!/bin/bash
+#
+# Text Color Variables
+tcLtG=$'\033[00;37m'  # LIGHT GRAY
+tcDkG=$'\033[01;30m'  # DARK GRAY
+tcLtR=$'\033[01;31m'  # LIGHT RED
+tcLtGRN=$'\033[01;32m' # LIGHT GREEN
+tcLtBL=$'\033[01;34m'  # LIGHT BLUE
+tcLtP=$'\033[01;35m'   # LIGHT PURPLE
+tcLtC=$'\033[01;36m'   # LIGHT CYAN
+tcW=$'\033[01;37m'     # WHITE
+tcRESET=$'\033[0m'
+tcORANGE=$'\033[38;5;209m'
+#
+# Time of day
+HOUR=$(date +"%H")
+if [ $HOUR -lt 12 ] && [ $HOUR -ge 0 ]; then TIME="morning"
+elif [ $HOUR -lt 17 ] && [ $HOUR -ge 12 ]; then TIME="afternoon"
+else TIME="evening"
+fi
+#
+# System uptime
+uptime=$(cat /proc/uptime | cut -f1 -d.)
+upDays=$((uptime/60/60/24))
+upHours=$((uptime/60/60%24))
+upMins=$((uptime/60%60))
+MEMORY_USED=$(free -m | awk '/Mem/ { printf("%3.1f%%", $3/$2*100) }')
+MEMORY1=$(free -t -m | grep "Mem" | awk '{print $3" MB";}')
+MEMORY2=$(free -t -m | grep "Mem" | awk '{print $2" MB";}')
+ROOT_USED=$(df -h / | awk '/\// {print $(NF-1)}')
+#
+# System + Memory
+SYS_LOADS=$(cat /proc/loadavg | awk '{print $1}')
+SWAP_USED=$(free -m | tail -n 1 | awk '{print $3}')
+NUM_PROCS=$(ps aux | wc -l)
+IPADDRESS=$(hostname -I | awk '{print $1}')
+#
+# 1C Version check with improved service detection
+get_1c_version() {
+    # Check active services first
+    ACTIVE_SERVICES=$(systemctl list-units -t service --state=active --no-legend --no-pager | grep -i -E '1c|srv1cv8|ras-' | sort -u)
+    
+    # If no active services, check all installed services
+    if [ -z "$ACTIVE_SERVICES" ]; then
+        ALL_SERVICES=$(systemctl list-unit-files --type=service --no-legend --no-pager | grep -i -E '1c|srv1cv8|ras-' | awk '{print $1}')
+        
+        for service in $ALL_SERVICES; do
+            # Extract version from service name
+            VERSION=$(echo "$service" | grep -oE '8\.[0-9]+\.[0-9]+\.[0-9]+')
+            
+            if [ -n "$VERSION" ]; then
+                if [[ "$service" =~ ras- ]]; then
+                    TYPE="RAS"
+                elif [[ "$service" =~ @2x ]]; then
+                    TYPE="Debug"
+                else
+                    TYPE="Server"
+                fi
+                
+                echo -e "${tcLtG} - 1C Version..........:${tcW} $VERSION ($TYPE, service exists but not running)"
+            fi
+        done
+        
+        if [ -z "$ALL_SERVICES" ]; then
+            echo -e "${tcLtG} - 1C Version..........:${tcW} No 1C services found"
+        fi
+        return
+    fi
+    
+    # Process active services
+    echo "$ACTIVE_SERVICES" | awk -v tcLtG="$tcLtG" -v tcW="$tcW" '
+    {
+        service = $1
+        status = $3
+        version = service
+        sub(/.*[^0-9]/, "", version)
+        sub(/[^0-9].*/, "", version)
+        
+        if (version == "") {
+            desc = $0
+            sub(/^[^ ]+ +[^ ]+ +[^ ]+ +[^ ]+ +/, "", desc)
+            if (match(desc, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/)) {
+                version = substr(desc, RSTART, RLENGTH)
+            } else {
+                version = "unknown"
+            }
+        }
+        
+        if (service ~ /ras-/) type = "RAS"
+        else if (service ~ /@2x/) type = "Debug"
+        else type = "Server"
+        
+        versions[version] = versions[version] ? versions[version] ", " type : type
+    }
+    END {
+        for (v in versions) {
+            printf("%s - 1C Version..........:%s %s (%s)\n", tcLtG, tcW, v, versions[v])
+        }
+    }'
+}
+#
+echo -e "${tcDkG}==================================================================="
+echo -e "${tcLtG} Good $TIME ! ${tcORANGE}                    Организация            "
+echo -e "${tcDkG}==================================================================="
+echo -e "${tcLtG} Сервер 1С:Предприятие x64"
+echo -e "${tcDkG}==================================================================="
+echo -e "${tcLtG} - Hostname............:${tcW} $(hostname -f)"
+echo -e "${tcLtG} - IP Address..........:${tcW} $IPADDRESS"
+echo -e "${tcLtG} - Release.............:${tcW} $(lsb_release -s -d)"
+echo -e "${tcLtG} - Kernel..............: ${tcW}$(uname -r)"
+echo -e "${tcLtG} - Users...............: ${tcW}Currently $(users | wc -w) user(s) logged on"
+echo -e "${tcLtG} - Server Time.........: ${tcW}$(date)"
+echo -e "${tcLtG} - System load.........: ${tcW}$SYS_LOADS / $NUM_PROCS processes running"
+echo -e "${tcLtG} - Memory used.........: ${tcW}$MEMORY1 / $MEMORY2"
+echo -e "${tcLtG} - Memory used %.......: ${tcW}$MEMORY_USED"
+echo -e "${tcLtG} - / used..............: ${tcW}$ROOT_USED"
+echo -e "${tcLtG} - Swap used...........: ${tcW}$SWAP_USED MB"
+echo -e "${tcLtG} - System uptime.......: ${tcW}$upDays days $upHours hours $upMins minutes"
+get_1c_version
+echo -e "${tcDkG}==================================================================="
+echo -e "${tcRESET}"

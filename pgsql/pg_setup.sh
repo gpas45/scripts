@@ -39,7 +39,6 @@ PG_BASE="/opt/pgpro/${PGVER}"
 PG_BIN="${PG_BASE}/bin"
 PG_DATA="/var/lib/pgpro/${PGVER}/data"
 PG_HBA="${PG_DATA}/pg_hba.conf"
-PG_CONF="${PG_DATA}/postgresql.conf"
 PG_MAJOR="$(echo "${PGVER}" | sed -E 's/.*-([0-9]+).*/\1/')"
 
 export DEBIAN_FRONTEND=noninteractive
@@ -110,7 +109,6 @@ if [[ "${PG_INSTALLED}" -eq 1 ]]; then
 fi
 
 # 2) Проверка существования каталога данных кластера
-DID_DATA_BACKUP=0
 if [[ -d "${PG_DATA}" ]]; then
   log_warn "Обнаружен каталог данных: ${PG_DATA}"
   if ask_yes_no "Продолжить установку? Это может перезаписать данные. [y/N]" "N"; then
@@ -120,7 +118,6 @@ if [[ -d "${PG_DATA}" ]]; then
         PG_DATA_BKP="${PG_DATA}.backup.$(date +%F_%H%M%S)"
       fi
       run "Резервная копия каталога данных в ${PG_DATA_BKP}" mv "${PG_DATA}" "${PG_DATA_BKP}"
-      DID_DATA_BACKUP=1
     else
       log_warn "Резервная копия не выполнена. Старый ${PG_DATA} будет удалён при переинициализации."
     fi

@@ -11,10 +11,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # Порог error: при -S warning есть известные находки в бэкап-скриптах,
-      # после их исправления порог можно ужесточить до warning.
       - name: Run shellcheck
-        run: find . -name '*.sh' -print0 | xargs -0 shellcheck -S error
+        run: find . -name '*.sh' -print0 | xargs -0 shellcheck -S warning
 
   psscriptanalyzer:
     runs-on: ubuntu-latest

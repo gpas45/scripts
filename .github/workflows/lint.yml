@@ -1,0 +1,33 @@
+name: Lint
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Порог error: при -S warning есть известные находки в бэкап-скриптах,
+      # после их исправления порог можно ужесточить до warning.
+      - name: Run shellcheck
+        run: find . -name '*.sh' -print0 | xargs -0 shellcheck -S error
+
+  psscriptanalyzer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          Install-Module -Name PSScriptAnalyzer -Force -Scope CurrentUser
+          $results = Get-ChildItem -Path . -Recurse -Filter *.ps1 |
+            ForEach-Object { Invoke-ScriptAnalyzer -Path $_.FullName -Severity Error }
+          if ($results) {
+            $results | Format-Table -AutoSize | Out-String | Write-Host
+            exit 1
+          }
+          Write-Host 'PSScriptAnalyzer: no errors found.'

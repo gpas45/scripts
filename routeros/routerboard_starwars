@@ -1,0 +1,23 @@
+/system scheduler
+add name=starwars on-event=":delay 15;\r\
+    \n \r\
+    \n:beep frequency=500 length=500ms;:delay 500ms;\r\
+    \n:beep frequency=500 length=500ms;:delay 500ms;\r\
+    \n:beep frequency=500 length=500ms;:delay 500ms;\r\
+    \n:beep frequency=400 length=500ms;:delay 400ms;\r\
+    \n:beep frequency=600 length=200ms;:delay 100ms;\r\
+    \n:beep frequency=500 length=500ms;:delay 500ms;\r\
+    \n:beep frequency=400 length=500ms;:delay 400ms;\r\
+    \n:beep frequency=600 length=200ms;:delay 100ms;\r\
+    \n:beep frequency=500 length=500ms;:delay 1000ms;\r\
+    \n \r\
+    \n:beep frequency=750 length=500ms;:delay 500ms;\r\
+    \n:beep frequency=750 length=500ms;:delay 500ms;\r\
+    \n:beep frequency=750 length=500ms;:delay 500ms;\r\
+    \n:beep frequency=810 length=500ms;:delay 400ms;\r\
+    \n:beep frequency=600 length=200ms;:delay 100ms;\r\
+    \n:beep frequency=470 length=500ms;:delay 500ms;\r\
+    \n:beep frequency=400 length=500ms;:delay 400ms;\r\
+    \n:beep frequency=600 length=200ms;:delay 100ms;\r\
+    \n:beep frequency=500 length=500ms;:delay 1000ms;" policy=reboot,read,write \
+    start-time=startup

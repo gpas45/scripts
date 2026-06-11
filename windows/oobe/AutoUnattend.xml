@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- https://www.outsidethebox.ms/19924/ -->
+<unattend xmlns="urn:schemas-microsoft-com:unattend">
+    <settings pass="windowsPE">
+        <component name="Microsoft-Windows-International-Core-WinPE" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+            <InputLocale>en-US; ru-RU</InputLocale>
+            <SystemLocale>ru-RU</SystemLocale>
+            <UILanguage>ru-RU</UILanguage>
+            <UserLocale>ru-RU</UserLocale>
+        </component>
+        <component name="Microsoft-Windows-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+            <UserData>
+                <!-- KMS keys https://docs.microsoft.com/windows-server/get-started/kmsclientkeys -->
+                <ProductKey>
+                    <Key></Key>
+                </ProductKey>
+                <AcceptEula>true</AcceptEula>
+            </UserData>
+            <!-- Обход требований Windows 11 к TPM, SecureBoot, RAM
+            BypassCPUCheck, BypassStorageCheck не нужны https://t.me/sterkin_ru/1303
+            <RunAsynchronous>
+                <RunAsynchronousCommand wcm:action="add">
+                    <Description>Bypass TPM check</Description>
+                    <Order>1</Order>
+                    <Path>cmd /c reg add HKLM\SYSTEM\Setup\LabConfig /v BypassTPMCheck /t REG_DWORD /d 1</Path>
+                </RunAsynchronousCommand>
+                <RunAsynchronousCommand wcm:action="add">
+                    <Description>Bypass SecureBoot check</Description>
+                    <Order>2</Order>
+                    <Path>cmd /c reg add HKLM\SYSTEM\Setup\LabConfig /v BypassSecureBootCheck /t REG_DWORD /d 1</Path>
+                </RunAsynchronousCommand>
+                <RunAsynchronousCommand wcm:action="add">
+                    <Description>Bypass RAM check</Description>
+                    <Order>3</Order>
+                    <Path>cmd /c reg add HKLM\SYSTEM\Setup\LabConfig /v BypassRAMCheck /t REG_DWORD /d 1</Path>
+                </RunAsynchronousCommand>
+            </RunAsynchronous>  -->
+        </component>
+    </settings>
+    <settings pass="oobeSystem">
+        <component name="Microsoft-Windows-International-Core" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+            <InputLocale>en-US; ru-RU</InputLocale>
+            <SystemLocale>ru-RU</SystemLocale>
+            <UILanguage>ru-RU</UILanguage>
+            <UserLocale>ru-RU</UserLocale>
+        </component>
+        <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+        <!-- Пример запуска скрипта из корня установочного диска 
+            <FirstLogonCommands>
+                <SynchronousCommand wcm:action="add">
+                    <Description>Import Edge Policies https://www.outsidethebox.ms/22326/</Description>             
+                    <CommandLine>powershell -command "(Get-Volume).DriveLetter | Foreach-Object {if (Test-Path "${PSItem}:\edge-policy_v2.ps1") {powershell -ex bypass -file ${PSItem}:\edge-policy_v2.ps1}}"</CommandLine>
+                    <Order>1</Order>
+                </SynchronousCommand>       
+            </FirstLogonCommands> -->
+            <OOBE>
+                <HideEULAPage>true</HideEULAPage>
+                <HideOnlineAccountScreens>true</HideOnlineAccountScreens>
+                <ProtectYourPC>3</ProtectYourPC>
+                <!-- Пропуск настройки сети, если не подключена https://t.me/sterkin_ru/1563 -->
+                <HideWirelessSetupInOOBE>true</HideWirelessSetupInOOBE>
+            </OOBE>
+            <UserAccounts>
+                <LocalAccounts>
+                    <LocalAccount wcm:action="add">
+                        <Group>Administrators</Group>
+                        <Name>Admin</Name>
+                        <!--<Password>
+                            <Value>CHANGE_ME</Value>
+                            <PlainText>true</PlainText>
+                        </Password> -->
+                    </LocalAccount>
+                </LocalAccounts>
+            </UserAccounts>
+           <!-- <AutoLogon>
+                <Password>
+                    <Value>CHANGE_ME</Value>
+                    <PlainText>true</PlainText>
+                </Password>
+                <Username>Admin</Username>
+                <LogonCount>1</LogonCount>
+                <Enabled>true</Enabled>
+            </AutoLogon> -->
+        </component>
+    </settings>
+</unattend>

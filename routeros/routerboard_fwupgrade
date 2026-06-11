@@ -1,0 +1,6 @@
+/system scheduler
+add name=routerboard_fwupgrade on-event="if ([/system routerboard get current-firmware] != [/system routerboard get upgrade-firmware]) do={\r\
+    \n/system routerboard upgrade\r\
+    \n:delay 15s\r\
+    \n/system reboot\r\
+    \n}" policy=reboot,read,write,sensitive start-time=startup

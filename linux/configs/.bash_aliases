@@ -1,6 +1,4 @@
-# Shell Prompt Configuration
-
-DOCKER_FOLDER=/opt/docker      # Default Docker folder if no config exists
+DOCKER_FOLDER=$HOME/docker      # Default Docker folder if no config exists
 
 #------------------------------------------------------------------------------
 # DOCKER MANAGEMENT
@@ -14,7 +12,7 @@ alias dexec='sudo docker exec -ti'      # Execute command in running container (
 
 # Docker Logs and Monitoring
 alias dlogs='sudo docker logs -tf --tail="50" '      # Show last 50 lines of container logs and follow output
-alias dlogsize='sudo du -ch $(sudo docker inspect --format='{{.LogPath}}' $(sudo docker ps -qa)) | sort -h'      # Display size of container log files
+alias dlogsize='sudo du -ch $(sudo docker inspect --format="{{.LogPath}}" $(sudo docker ps -qa)) | sort -h'      # Display size of container log files
 alias dips="sudo docker ps -q | xargs -n 1 sudo docker inspect -f '{{.Name}}%tab%{{range .NetworkSettings.Networks}}{{.IPAddress}}%tab%{{end}}' | sed 's#%tab%#\t#g' | sed 's#/##g' | sort | column -t -N NAME,IP\(s\) -o $'\t'"      # List IP addresses of all containers
 
 # Docker Container Management
@@ -26,8 +24,24 @@ alias drm='sudo docker rm $(sudo docker ps -a -q)'      # Remove specified conta
 alias dprunevol='sudo docker volume prune'      # Remove all unused volumes
 alias dprunesys='sudo docker system prune -a'      # Remove all unused containers, networks, images (both dangling and unreferenced)
 alias ddelimages='sudo docker rmi $(sudo docker images -q)'      # Delete all Docker images
-alias derase='dstopcont ; drmcont ; ddelimages ; dvolprune ; dsysprune'      # Complete cleanup: stop and remove all containers, images, volumes
+alias derase='dstopall ; drm ; ddelimages ; dprunevol ; dprunesys'      # Complete cleanup: stop and remove all containers, images, volumes
 alias dprune='ddelimages ; dprunevol ; dprunesys'      # Safe cleanup of unused resources
+
+# Docker Image Management
+alias dimages='sudo docker images --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}\t{{.CreatedSince}}"'
+alias dhist='sudo docker history'  # Show image history
+
+# Docker System Info
+alias dinfo='sudo docker info'  # Show Docker system information
+alias dversion='sudo docker version'  # Show Docker version
+
+# Enhanced monitoring
+alias dstats='sudo docker stats --no-stream --format "table {{.Container}}\t{{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.NetIO}}\t{{.BlockIO}}"'
+alias dtop='sudo docker stats'  # Real-time container stats
+
+# Docker Compose Validation
+alias dcconfig='dcrun config'  # Validate and view compose config
+alias dcdry='dcrun up --dry-run'  # Dry run without starting
 
 #------------------------------------------------------------------------------
 # DOCKER COMPOSE & TRAEFIK
@@ -46,6 +60,36 @@ alias dclogs='dcrun logs -tf --tail="50"'      # Show and follow last 50 lines o
 
 # Traefik Specific
 alias traefiklogs='tail -f $DOCKER_FOLDER/logs/$HOSTNAME/traefik/traefik.log'      # Monitor Traefik reverse proxy logs
+
+#------------------------------------------------------------------------------
+# CROWDSEC SECURITY
+#------------------------------------------------------------------------------
+
+# CrowdSec CLI Commands
+alias cscli='dcrun exec -t crowdsec cscli'      # Execute CrowdSec CLI commands
+alias csdecisions='cscli decisions list'      # List current IP ban decisions
+alias csalerts='cscli alerts list'      # List security alerts
+alias csinspect='cscli alerts inspect -d'      # Detailed inspection of specific alerts
+alias cshubs='cscli hub list'      # List available CrowdSec hubs
+alias csparsers='cscli parsers list'      # List installed parsers
+alias cscollections='cscli collections list'      # List installed collections
+alias cshubupdate='cscli hub update'      # Update CrowdSec hub index
+alias cshubupgrade='cscli hub upgrade'      # Upgrade all hub items
+alias csmetrics='cscli metrics'      # Show CrowdSec metrics
+alias csmachines='cscli machines list'      # List CrowdSec machines
+alias csbouncers='cscli bouncers list'      # List registered bouncers
+
+# CrowdSec Service Management
+alias csfbstatus='sudo systemctl status crowdsec-firewall-bouncer.service'      # Check firewall bouncer status
+alias csfbstart='sudo systemctl start crowdsec-firewall-bouncer.service'      # Start firewall bouncer
+alias csfbstop='sudo systemctl stop crowdsec-firewall-bouncer.service'      # Stop firewall bouncer
+alias csfbrestart='sudo systemctl restart crowdsec-firewall-bouncer.service'      # Restart firewall bouncer
+alias csbrestart='dcrec2 traefik-bouncer ; csfbrestart'      # Restart both Traefik bouncer and firewall bouncer
+
+# CrowdSec Logs
+alias tailkern='sudo tail -f /var/log/kern.log'      # Monitor kernel logs
+alias tailauth='sudo tail -f /var/log/auth.log'      # Monitor authentication logs
+alias tailcsfb='sudo tail -f /var/log/crowdsec-firewall-bouncer.log'      # Monitor firewall bouncer logs
 
 #------------------------------------------------------------------------------
 # SYSTEM ADMINISTRATION
@@ -68,12 +112,13 @@ alias ls='ls -F --color=auto --group-directories-first'      # Colorized listing
 alias ll='ls -alh --color=auto --group-directories-first'      # Detailed list, human-readable sizes
 alias lt='ls --human-readable --color=auto --size -1 -S --classify'      # List files by size
 alias lsr='ls --color=auto -t -1'      # List files by modification time
+alias l='ls --color=auto -lA'      # Compact long listing, almost all
+alias dir='dir --color=auto'      # Colorized dir
+alias grep='grep --colour=auto'      # Colorized grep
 alias mkdir='mkdir -pv'      # Create parent directories as needed, verbose output
 alias cp='cp -iv'      # Interactive and verbose copy
 alias mv='mv -iv'      # Interactive and verbose move
-alias dir='dir --color=auto'
-alias grep='grep --colour=auto'
-alias l='ls --color=auto -lA'
+alias rm="rm -iv"
 
 # Storage and Disk Management
 alias fdisk='sudo fdisk -l'      # List disk partitions
@@ -160,6 +205,20 @@ alias ufwdelete='sudo ufw delete'      # Delete a UFW rule
 alias ufwreload='sudo ufw reload'      # Reload UFW rules
 
 #------------------------------------------------------------------------------
+# SYNOLOGY DSM
+#------------------------------------------------------------------------------
+
+# Synology Service Management
+alias servicelist='sudo synoservicecfg --list'      # List all Synology services (DSM 6.x)
+alias servicestatus='sudo synosystemctl status'      # Check status of Synology service
+alias servicestop='sudo synosystemctl stop'      # Stop a Synology service
+alias servicehstop='sudo synoservicecfg --hard-stop'      # Hard stop a service (DSM 6.x)
+alias servicestart='sudo synosystemctl start'      # Start a Synology service
+alias servicehstart='sudo synoservicecfg --hard-start'      # Hard start a service (DSM 6.x)
+alias servicerestart='sudo synosystemctl restart'      # Restart a Synology service
+alias restartdocker='sudo synosystemctl restart pkgctl-Docker'      # Restart Docker package
+
+#------------------------------------------------------------------------------
 # FILE COMPRESSION
 #------------------------------------------------------------------------------
 
@@ -180,47 +239,3 @@ alias reload='. ~/.bashrc'      # Reload bash configuration
 alias aliases='nano ~/.bash_aliases'      # Edit aliases file
 alias hosts='sudo nano /etc/hosts'      # Edit hosts file
 alias bashrc='nano ~/.bashrc'      # Edit bash configuration file
-
-#------------------------------------------------------------------------------
-# CROWDSEC SECURITY
-#------------------------------------------------------------------------------
-
-## CrowdSec CLI Commands
-#alias cscli='dcrun exec -t crowdsec cscli'      # Execute CrowdSec CLI commands
-#alias csdecisions='cscli decisions list'      # List current IP ban decisions
-#alias csalerts='cscli alerts list'      # List security alerts
-#alias csinspect='cscli alerts inspect -d'      # Detailed inspection of specific alerts
-#alias cshubs='cscli hub list'      # List available CrowdSec hubs
-#alias csparsers='cscli parsers list'      # List installed parsers
-#alias cscollections='cscli collections list'      # List installed collections
-#alias cshubupdate='cscli hub update'      # Update CrowdSec hub index
-#alias cshubupgrade='cscli hub upgrade'      # Upgrade all hub items
-#alias csmetrics='cscli metrics'      # Show CrowdSec metrics
-#alias csmachines='cscli machines list'      # List CrowdSec machines
-#alias csbouncers='cscli bouncers list'      # List registered bouncers
-
-## CrowdSec Service Management
-#alias csfbstatus='sudo systemctl status crowdsec-firewall-bouncer.service'      # Check firewall bouncer status
-#alias csfbstart='sudo systemctl start crowdsec-firewall-bouncer.service'      # Start firewall bouncer
-#alias csfbstop='sudo systemctl stop crowdsec-firewall-bouncer.service'      # Stop firewall bouncer
-#alias csfbrestart='sudo systemctl restart crowdsec-firewall-bouncer.service'      # Restart firewall bouncer
-#alias csbrestart='dcrec2 traefik-bouncer ; csfbrestart'      # Restart both Traefik bouncer and firewall bouncer#
-
-## CrowdSec Logs
-#alias tailkern='sudo tail -f /var/log/kern.log'      # Monitor kernel logs
-#alias tailauth='sudo tail -f /var/log/auth.log'      # Monitor authentication logs
-#alias tailcsfb='sudo tail -f /var/log/crowdsec-firewall-bouncer.log'      # Monitor firewall bouncer logs
-
-#------------------------------------------------------------------------------
-# SYNOLOGY DSM
-#------------------------------------------------------------------------------
-
-## Synology Service Management
-#alias servicelist='sudo synoservicecfg --list'      # List all Synology services (DSM 6.x)
-#alias servicestatus='sudo synosystemctl status'      # Check status of Synology service
-#alias servicestop='sudo synosystemctl stop'      # Stop a Synology service
-#alias servicehstop='sudo synoservicecfg --hard-stop'      # Hard stop a service (DSM 6.x)
-#alias servicestart='sudo synosystemctl start'      # Start a Synology service
-#alias servicehstart='sudo synoservicecfg --hard-start'      # Hard start a service (DSM 6.x)
-#alias servicerestart='sudo synosystemctl restart'      # Restart a Synology service
-#alias restartdocker='sudo synosystemctl restart pkgctl-Docker'      # Restart Docker package

@@ -1,0 +1,168 @@
+#!/bin/bash
+
+# Text Color Variables
+tcLtG=$'\033[00;37m'   # LIGHT GRAY
+tcDkG=$'\033[01;30m'   # DARK GRAY
+tcLtR=$'\033[01;31m'   # LIGHT RED
+tcLtGRN=$'\033[01;32m' # LIGHT GREEN
+tcLtBL=$'\033[01;34m'  # LIGHT BLUE
+tcLtP=$'\033[01;35m'   # LIGHT PURPLE
+tcLtC=$'\033[01;36m'   # LIGHT CYAN
+tcW=$'\033[01;37m'     # WHITE
+tcRESET=$'\033[0m'
+tcORANGE=$'\033[38;5;209m'
+
+# Time of day
+HOUR=$(date +"%H")
+if [ $HOUR -lt 12 ] && [ $HOUR -ge 0 ]; then TIME="morning"
+elif [ $HOUR -lt 17 ] && [ $HOUR -ge 12 ]; then TIME="afternoon"
+else TIME="evening"
+fi
+
+# System uptime
+uptime=$(cat /proc/uptime | cut -f1 -d.)
+upDays=$((uptime/60/60/24))
+upHours=$((uptime/60/60%24))
+upMins=$((uptime/60%60))
+
+# MEMORY_USED - используем free для подсчёта процента использованной памяти
+MEMORY_USED=$(free -m | awk '/Mem/ { printf("%3.1f%%", $3/$2*100) }')
+
+# SYS_LOADS - берем первое значение из /proc/loadavg
+SYS_LOADS=$(cat /proc/loadavg | awk '{print $1}')
+
+# Вытаскиваем числовое значение памяти (без процента)
+MEMORY_USED_VALUE=$(echo "$MEMORY_USED" | tr -d '%')
+
+# Окраска MEMORY_USED (>80% красный, иначе зеленый)
+if (( $(echo "$MEMORY_USED_VALUE > 80" | bc -l) )); then
+    MEMORY_USED_COLORED="${tcLtR}$MEMORY_USED${tcW}"
+else
+    MEMORY_USED_COLORED="${tcLtGRN}$MEMORY_USED${tcW}"
+fi
+
+# Количество CPU ядер
+CPU_CORES=$(nproc)
+
+# Преобразуем SYS_LOADS в число с плавающей точкой (для сравнения)
+SYS_LOADS_FLOAT=$(echo "$SYS_LOADS" | awk '{print $1 + 0}')
+
+# Порог загрузки: 70% от количества ядер
+LOAD_THRESHOLD=$(echo "$CPU_CORES * 0.7" | bc)
+
+# Окраска SYS_LOADS (>70% от CPU CORES - красный, иначе зеленый)
+if (( $(echo "$SYS_LOADS_FLOAT > $LOAD_THRESHOLD" | bc -l) )); then
+    SYS_LOADS_COLORED="${tcLtR}$SYS_LOADS${tcW}"
+else
+    SYS_LOADS_COLORED="${tcLtGRN}$SYS_LOADS${tcW}"
+fi
+
+# Используемая и общая память (MB)
+MEMORY1=$(free -t -m | grep "Mem" | awk '{print $3" MB";}')
+MEMORY2=$(free -t -m | grep "Mem" | awk '{print $2" MB";}')
+
+# Использование корневого раздела в процентах
+ROOT_USED=$(df -h / | awk '/\// {print $(NF-1)}')
+ROOT_USED_PCT=${ROOT_USED%\%}
+
+# Подсветка использования корневого раздела (>80% красный, иначе зеленый)
+if [ "$ROOT_USED_PCT" -gt 80 ]; then
+    ROOT_USED_COLORED="${tcLtR}$ROOT_USED${tcW}"
+else
+    ROOT_USED_COLORED="${tcLtGRN}$ROOT_USED${tcW}"
+fi
+
+# Использование swap, количество процессов, IP адрес
+SWAP_USED=$(free -m | tail -n 1 | awk '{print $3}')
+NUM_PROCS=$(ps aux | wc -l)
+IPADDRESS=$(hostname -I | awk '{print $1}')
+
+# Функция для вывода информации о PostgreSQL-инстансах
+get_postgresql_info() {
+    if ! command -v psql &> /dev/null; then
+        echo -e "${tcLtG} - PostgreSQL..........:${tcW} Not installed"
+        return
+    fi
+
+    # Получаем уникальные порты PostgreSQL активных прослушиваний
+    PORTS=$(ss -tlnp 2>/dev/null \
+        | grep postgres \
+        | grep -oP ':\d+' \
+        | grep -oP '\d+' \
+        | sort -u)
+
+    if [ -z "$PORTS" ]; then
+        echo -e "${tcLtG} - PostgreSQL..........:${tcW} No active instances found"
+        return
+    fi
+
+	for PORT in $PORTS; do
+		echo -e "${tcLtC}== Instance on port $PORT ======================${tcRESET}"
+
+		# Проверка доступности инстанса через pg_isready
+		if ! pg_isready -p "$PORT" -U postgres -t 3 >/dev/null 2>&1; then
+			echo -e "Port ${tcLtR}$PORT${tcRESET}: ${tcLtR}not ready, skip${tcRESET}"
+			continue
+		else
+			echo -e "Port ${tcLtGRN}$PORT${tcRESET}: ${tcLtGRN}ready${tcRESET}"
+		fi
+
+		# Получаем версию PostgreSQL
+		PG_VERSION=$(psql -U postgres -p "$PORT" -d postgres -c "SHOW server_version;" -t 2>/dev/null | head -n1 | tr -d ' ')
+		if [ -z "$PG_VERSION" ]; then
+			echo -e "${tcLtR} - Cannot get PostgreSQL version on port $PORT${tcRESET}"
+			continue
+		fi
+		echo -e "${tcLtG} - PostgreSQL Version..:${tcW} $PG_VERSION"
+
+		# Кол-во баз без шаблонных и 'postgres'
+		DB_COUNT=$(psql -U postgres -p "$PORT" -d postgres -t -c "SELECT COUNT(*) FROM pg_database WHERE datistemplate = false AND datname <> 'postgres';" 2>/dev/null | tr -d '[:space:]')
+		[ -z "$DB_COUNT" ] && DB_COUNT="0"
+		echo -e "${tcLtG} - Databases Count.....:${tcW} $DB_COUNT"
+
+		# Общий размер баз
+		TOTAL_SIZE=$(psql -U postgres -p "$PORT" -d postgres -t -c "SELECT COALESCE(pg_size_pretty(SUM(pg_database_size(oid))), '0B') FROM pg_database WHERE datistemplate = false AND datname <> 'postgres';" 2>/dev/null | tr -d '[:space:]')
+		[ -z "$TOTAL_SIZE" ] && TOTAL_SIZE="0B"
+		echo -e "${tcLtG} - Total Size.........:${tcW} $TOTAL_SIZE"
+
+		echo -e "${tcLtG} - Databases..:${tcW}"
+		# Выводим топ-3 баз по размеру
+		psql -U postgres -p "$PORT" -d postgres -A -t -c "
+			SELECT datname, pg_size_pretty(pg_database_size(oid)) AS size
+			FROM pg_database
+			WHERE datistemplate = false
+			  AND datname <> 'postgres'
+			ORDER BY pg_database_size(oid) DESC
+			LIMIT 3;
+		" 2>/dev/null | while IFS='|' read -r DB_NAME DB_SIZE; do
+			[ -n "$DB_NAME" ] && echo -e "   ${tcLtG}$DB_NAME${tcW} ($DB_SIZE)"
+		done
+
+		echo # Пустая строка между инстансами
+	done
+}
+
+# Выводим собранную системную информацию
+echo -e "${tcDkG}==================================================================="
+echo -e "${tcLtG} Good $TIME ! ${tcORANGE}                    Организация           "
+echo -e "${tcDkG}==================================================================="
+echo -e "${tcLtG} Сервер БД PostgreSQL (БД)"
+echo -e "${tcDkG}==================================================================="
+echo -e "${tcLtG} - Hostname............:${tcW} $(hostname -f)"
+echo -e "${tcLtG} - IP Address..........:${tcW} $IPADDRESS"
+echo -e "${tcLtG} - Release.............:${tcW} $(lsb_release -s -d)"
+echo -e "${tcLtG} - Kernel..............: ${tcW}$(uname -r)"
+echo -e "${tcLtG} - Users...............: ${tcW}Currently $(users | wc -w) user(s) logged on"
+echo -e "${tcLtG} - Server Time.........: ${tcW}$(date)"
+echo -e "${tcLtG} - System load.........: ${tcW}$SYS_LOADS_COLORED / $NUM_PROCS processes running"
+echo -e "${tcLtG} - Memory used.........: ${tcW}$MEMORY1 / $MEMORY2"
+echo -e "${tcLtG} - Memory used %.......: ${tcW}$MEMORY_USED_COLORED"
+echo -e "${tcLtG} - / used..............: ${tcW}$ROOT_USED_COLORED"
+echo -e "${tcLtG} - Swap used...........: ${tcW}$SWAP_USED MB"
+echo -e "${tcLtG} - System uptime.......: ${tcW}$upDays days $upHours hours $upMins minutes"
+echo -e "${tcDkG}==================================================================="
+# Вызов функции PostgreSQL info
+get_postgresql_info
+
+echo -e "${tcDkG}==================================================================="
+echo -e "${tcRESET}"

@@ -1,11 +1,27 @@
+# RouterOS minimal autorun / bootstrap script
+# Basic connectivity + service hardening + time sync.
+# Adjust the CHANGE_ME placeholders before importing:
+#   /import file-name=autorun.scr
+
+# ---------------------------------------------------------------------------
+# Basic connectivity (per-deployment — adjust address / gateway)
+# ---------------------------------------------------------------------------
 /ip address
-add address= interface=ether1 network=10.0.0.1
+add address=10.0.0.2/24 interface=ether1 comment="CHANGE_ME: router IP/mask"
 /ip route
-add dst-address=0.0.0.0/0 gateway=10.0.0.1
+add dst-address=0.0.0.0/0 gateway=10.0.0.1 comment="CHANGE_ME: default gateway"
 /ip dhcp-client
 add interface=ether1 disabled=yes
+
+# ---------------------------------------------------------------------------
+# Admin user
+# ---------------------------------------------------------------------------
 /user
-set 0  password="CHANGE_ME"
+set 0 password="CHANGE_ME"
+
+# ---------------------------------------------------------------------------
+# Service / management hardening
+# ---------------------------------------------------------------------------
 /ip service
 set telnet disabled=yes
 set ftp disabled=yes
@@ -22,6 +38,10 @@ set allowed-interface-list=none
 set enabled=no
 /ipv6 settings
 set disable-ipv6=yes
+
+# ---------------------------------------------------------------------------
+# Time / NTP
+# ---------------------------------------------------------------------------
 /system clock
 set time-zone-name=Asia/Yekaterinburg
 /system ntp client

@@ -12,7 +12,6 @@ set -euo pipefail
 TEMP_DIR="/root/temp"
 NODE="$(hostname)"
 MIKROTIK_DL="https://download.mikrotik.com/routeros"
-MIKROTIK_UPG="https://upgrade.mikrotik.com/routeros"
 
 # Defaults for the created VM (override here if needed)
 VM_MEMORY=256
@@ -45,13 +44,10 @@ valid_version() {
    [[ "$1" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]
 }
 
-# fetch_channel CHANNEL — print the newest version for a RouterOS channel.
-# CHANNEL is one of: stable, long-term, testing. Prints empty on failure.
-fetch_channel() {
-   local channel="$1" line
-   # The NEWESTv7.<channel> file contains: "<version> <unix-timestamp>"
-   line="$(wget -qO- "${MIKROTIK_UPG}/NEWESTv7.${channel}" 2>/dev/null || true)"
-   echo "${line%% *}"
+# version_exists VERSION — return 0 if a CHR image for VERSION is published on
+# MikroTik's download server. Uses a HEAD request so nothing is downloaded.
+version_exists() {
+   wget -q --spider "${MIKROTIK_DL}/$1/chr-$1.img.zip"
 }
 
 echo "############## Start of Script ##############"
@@ -66,24 +62,28 @@ else
 fi
 
 #### 2. determine version to deploy
+# MikroTik no longer publishes a reliable "latest version" file (the legacy
+# NEWEST*/LATEST.* feeds are frozen at 7.12.1), so instead of guessing the
+# newest release we let the user pick one and verify it actually exists.
 echo "## Preparing for image download and VM creation!"
-echo "-- Looking up current RouterOS releases from MikroTik..."
-stable_ver="$(fetch_channel stable)"
-lt_ver="$(fetch_channel long-term)"
+echo "-- Current Long-term / Stable releases are listed at https://mikrotik.com/download"
 
-[ -n "$lt_ver" ]     && echo "   Long-term (recommended): $lt_ver"
-[ -n "$stable_ver" ] && echo "   Stable:                  $stable_ver"
-[ -z "$lt_ver$stable_ver" ] && \
-   echo "   (could not reach MikroTik — enter a version manually)"
-
-# Default to long-term, fall back to stable.
-default_ver="${lt_ver:-$stable_ver}"
-prompt="Please input CHR version to deploy (6.38.2, 6.40.1, etc)"
-[ -n "$default_ver" ] && prompt="$prompt [$default_ver]"
-read -r -p "$prompt: " version
-version="${version:-$default_ver}"
-
-valid_version "$version" || die "Invalid version format: '$version'"
+while true; do
+   read -r -p "Please input CHR version to deploy (e.g. 7.18.2): " version
+   if ! valid_version "$version"; then
+      echo "-- Invalid version format, please try again (e.g. 7.18.2)."
+      continue
+   fi
+   # An already-downloaded image is good enough; otherwise confirm it exists.
+   if [ -f "$TEMP_DIR/chr-$version.img" ]; then
+      break
+   fi
+   echo "-- Verifying that CHR $version exists on MikroTik..."
+   if version_exists "$version"; then
+      break
+   fi
+   echo "-- CHR $version was not found on the download server, try another version."
+done
 
 #### 3. download image if needed
 img="$TEMP_DIR/chr-$version.img"

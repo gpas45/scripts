@@ -11,14 +11,12 @@
 # ---------------------------------------------------------------------------
 /routing filter rule
 # --- ospf-in: какие маршруты ПРИНИМАЕМ из OSPF в таблицу маршрутизации ---
-add chain=ospf-in comment="drop default route" rule="if (dst==0.0.0.0/0) {reject;}"
 add chain=ospf-in comment="accept 10.0.0.0/8" rule="if (dst in 10.0.0.0/8 && dst-len in 8-32) {accept;}"
 add chain=ospf-in comment="accept 172.16.0.0/12" rule="if (dst in 172.16.0.0/12 && dst-len in 12-32) {accept;}"
 add chain=ospf-in comment="accept 192.168.0.0/16" rule="if (dst in 192.168.0.0/16 && dst-len in 16-32) {accept;}"
 add chain=ospf-in comment="reject the rest (explicit)" rule="reject;"
 
 # --- ospf-out: какие маршруты ОТДАЁМ (redistribute) в OSPF ---
-add chain=ospf-out comment="drop default route" rule="if (dst==0.0.0.0/0) {reject;}"
 add chain=ospf-out comment="accept 10.0.0.0/8" rule="if (dst in 10.0.0.0/8 && dst-len in 8-32) {accept;}"
 add chain=ospf-out comment="accept 172.16.0.0/12" rule="if (dst in 172.16.0.0/12 && dst-len in 12-32) {accept;}"
 add chain=ospf-out comment="accept 192.168.0.0/16" rule="if (dst in 192.168.0.0/16 && dst-len in 16-32) {accept;}"

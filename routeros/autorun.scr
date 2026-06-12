@@ -7,11 +7,33 @@
 # Basic connectivity (per-deployment — adjust address / gateway)
 # ---------------------------------------------------------------------------
 /ip address
-add address=10.0.0.2/24 interface=ether1 comment="CHANGE_ME: router IP/mask"
+add address= interface=ether1 network=10.0.0.1 comment="address issued by ISP"
 /ip route
 add dst-address=0.0.0.0/0 gateway=10.0.0.1 comment="CHANGE_ME: default gateway"
 /ip dhcp-client
 add interface=ether1 disabled=yes
+
+# ---------------------------------------------------------------------------
+# Interface lists
+# ---------------------------------------------------------------------------
+/interface list
+add name=WAN comment="Uplinks / Internet-facing interfaces"
+add name=LAN comment="Local trusted networks"
+add name=StS comment="Site-to-Site tunnels"
+add name=VPN comment="Remote-access VPN clients"
+
+/interface list member
+# Assign your real interfaces here, examples below:
+add list=WAN interface=ether1
+# add list=LAN interface=bridge
+# add list=StS interface=<gre-tunnel1>
+# add list=VPN interface=<wireguard1>
+
+# ---------------------------------------------------------------------------
+# Firewall NAT
+# ---------------------------------------------------------------------------
+/ip firewall nat
+add action=masquerade chain=srcnat comment="LAN -> Internet" out-interface-list=WAN
 
 # ---------------------------------------------------------------------------
 # Admin user

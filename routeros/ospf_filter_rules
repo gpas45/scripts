@@ -1,7 +1,36 @@
+# OSPF routing filters (RouterOS 7.x)
+# Пропускает в/из OSPF только локальные RFC1918-сети, остальное отбрасывает.
+# Цель: не дать «протечь» в домен маршрутизации публичным префиксам,
+# default-route и чужим сетям.
+#
+# ВАЖНО: одни правила фильтра ничего не делают, пока они не привязаны к
+# OSPF-инстансу через in-filter-chain / out-filter-chain (см. секцию ниже).
+
+# ---------------------------------------------------------------------------
+# Цепочки фильтров
+# ---------------------------------------------------------------------------
 /routing filter rule
-add chain=ospf-in disabled=no rule="if (dst in 192.168.0.0/16 && dst-len in 16-32) {accept;}"
-add chain=ospf-in disabled=no rule="if (dst in 10.0.0.0/8 && dst-len in 8-32) {accept;}"
-add chain=ospf-in disabled=no rule="if (dst in 172.16.0.0/12 && dst-len in 12-32) {accept;}"
-add chain=ospf-out disabled=no rule="if (dst in 192.168.0.0/16 && dst-len in 16-32) {accept;}"
-add chain=ospf-out disabled=no rule="if (dst in 10.0.0.0/8 && dst-len in 8-32) {accept;}"
-add chain=ospf-out disabled=no rule="if (dst in 172.16.0.0/12 && dst-len in 12-32) {accept;}"
+# --- ospf-in: какие маршруты ПРИНИМАЕМ из OSPF в таблицу маршрутизации ---
+add chain=ospf-in comment="accept 10.0.0.0/8" rule="if (dst in 10.0.0.0/8 && dst-len in 8-32) {accept;}"
+add chain=ospf-in comment="accept 172.16.0.0/12" rule="if (dst in 172.16.0.0/12 && dst-len in 12-32) {accept;}"
+add chain=ospf-in comment="accept 192.168.0.0/16" rule="if (dst in 192.168.0.0/16 && dst-len in 16-32) {accept;}"
+add chain=ospf-in comment="reject the rest (explicit)" rule="reject;"
+
+# --- ospf-out: какие маршруты ОТДАЁМ (redistribute) в OSPF ---
+add chain=ospf-out comment="accept 10.0.0.0/8" rule="if (dst in 10.0.0.0/8 && dst-len in 8-32) {accept;}"
+add chain=ospf-out comment="accept 172.16.0.0/12" rule="if (dst in 172.16.0.0/12 && dst-len in 12-32) {accept;}"
+add chain=ospf-out comment="accept 192.168.0.0/16" rule="if (dst in 192.168.0.0/16 && dst-len in 16-32) {accept;}"
+add chain=ospf-out comment="reject the rest (explicit)" rule="reject;"
+
+# ---------------------------------------------------------------------------
+# Привязка цепочек к OSPF-инстансу (раскомментируй и укажи имя инстанса)
+# ---------------------------------------------------------------------------
+# /routing ospf instance
+# set [find name="default"] in-filter-chain=ospf-in out-filter-chain=ospf-out
+
+# Подсказки:
+#  - Конечное reject — поведение по умолчанию у /routing filter, добавлено
+#    явно для самодокументируемости.
+#  - Если нужно резать слишком специфичные маршруты (например, /32-хосты),
+#    ужесточи верхнюю границу dst-len, напр. "dst-len in 8-24".
+#  - Имя инстанса смотри в:  /routing ospf instance print

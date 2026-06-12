@@ -11,15 +11,18 @@
 #   StS = Site-to-Site tunnels, VPN = remote-access VPN clients.
 #   Port knocking sequence: 1234 -> 2345 -> 3456, then connect to 12345.
 
+# Per-provider settings (addresses, routes, dhcp-client, user passwords)
+# are intentionally NOT included here — configure them separately for each
+# uplink / deployment.
+
 # ---------------------------------------------------------------------------
-# Basic connectivity
+# Bridge
 # ---------------------------------------------------------------------------
-/ip address
-add address=10.0.0.1 interface=ether1 network=10.0.0.0
-/ip route
-add dst-address=0.0.0.0/0 gateway=10.0.0.1
-/ip dhcp-client
-add interface=ether1 disabled=yes
+/interface bridge
+add name=bridge comment="Local bridge"
+# Ports are intentionally not bound here — add them per deployment, e.g.:
+# /interface bridge port
+# add bridge=bridge interface=ether2
 
 # ---------------------------------------------------------------------------
 # Interface lists
@@ -79,10 +82,16 @@ add action=add-src-to-address-list address-list="black-list attackers" address-l
 add action=drop chain=detect-intrusion src-address-list="black-list attackers"
 
 # ---------------------------------------------------------------------------
+# DNS — resolver for LAN / VPN / StS clients
+# ---------------------------------------------------------------------------
+/ip dns
+set allow-remote-requests=yes servers=1.1.1.1,8.8.8.8
+# DNS queries are accepted from LAN / VPN / StS by the input chain rules above
+# and dropped from WAN by default.
+
+# ---------------------------------------------------------------------------
 # Service / management hardening
 # ---------------------------------------------------------------------------
-/user
-set 0 password="CHANGE_ME"
 /ip service
 set telnet disabled=yes
 set ftp disabled=yes
@@ -109,3 +118,16 @@ set time-zone-name=Asia/Yekaterinburg
 set enabled=yes
 /system ntp client servers
 add address=pool.ntp.org
+
+# ---------------------------------------------------------------------------
+# RouterBOARD firmware auto-upgrade
+# Upgrades the RouterBOARD firmware on startup when a newer one is available,
+# then reboots to apply it.
+# ---------------------------------------------------------------------------
+/system scheduler
+add name=routerboard_fwupgrade policy=reboot,read,write,sensitive start-time=startup \
+    on-event="if ([/system routerboard get current-firmware] != [/system routerboard get upgrade-firmware]) do={\r\
+    \n/system routerboard upgrade\r\
+    \n:delay 15s\r\
+    \n/system reboot\r\
+    \n}"

@@ -9,7 +9,7 @@
 set -euo pipefail
 
 #### vars
-TEMP_DIR="/root/temp"
+TEMP_DIR="/tmp"
 NODE="$(hostname)"
 MIKROTIK_DL="https://download.mikrotik.com/routeros"
 

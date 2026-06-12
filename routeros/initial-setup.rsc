@@ -100,12 +100,14 @@ set api disabled=yes
 set api-ssl disabled=yes
 /ip neighbor discovery-settings
 set discover-interface-list=none
+# MAC-server is left enabled (restricted to LAN) so the router stays reachable
+# via MAC-telnet / MAC-winbox during initial setup, before it has an IP address.
 /tool mac-server
-set allowed-interface-list=none
+set allowed-interface-list=LAN
 /tool mac-server mac-winbox
-set allowed-interface-list=none
+set allowed-interface-list=LAN
 /tool mac-server ping
-set enabled=no
+set enabled=yes
 /ipv6 settings
 set disable-ipv6=yes
 

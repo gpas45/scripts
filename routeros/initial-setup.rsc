@@ -116,6 +116,9 @@ set allowed-interface-list=all
 set allowed-interface-list=all
 /tool mac-server ping
 set enabled=yes
+# Disable the bandwidth-test server (open by default, common attack vector).
+/tool bandwidth-server
+set enabled=no
 /ipv6 settings
 set disable-ipv6=yes
 
@@ -138,6 +141,12 @@ set enabled=yes
 # ---------------------------------------------------------------------------
 /system logging
 set [find where topics="info"] topics=info,!dhcp,!wireless,!wifi
+
+# ---------------------------------------------------------------------------
+# RouterOS package update channel — use the long-term (stable) release branch
+# ---------------------------------------------------------------------------
+/system package update
+set channel=long-term
 
 # ---------------------------------------------------------------------------
 # RouterBOARD firmware auto-upgrade

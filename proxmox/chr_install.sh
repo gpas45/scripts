@@ -19,7 +19,7 @@ VM_SOCKETS=1
 VM_CORES=1
 VM_BRIDGE="vmbr0"
 VM_STORAGE="local"
-VM_DISK_EXTRA="256M"   # extra space added to the CHR disk when none is entered
+VM_DISK_EXTRA="512M"   # extra space added to the CHR disk when none is entered
 
 #### helpers
 

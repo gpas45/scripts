@@ -3,12 +3,16 @@
 # Скачивает актуальный список IPv4-сетей CloudFlare и обновляет address-list.
 #
 # Установка:
-# /system script add name=cloudflare-ip-updater source={ ... код ... }
+# /import file-name=cloudflare-ip-updater.rsc
+# /system script
+# add name=cloudflare-ip-updater policy=read,write,test source=[/file get cloudflare-ip-updater.rsc contents]
 # /system script run cloudflare-ip-updater
-#
+# 
 # Автозапуск:
-# /system scheduler add name=cloudflare-update interval=7d \
-#     start-time=03:31:00 on-event="/system script run cloudflare-ip-updater"
+# /system scheduler
+# add name=cloudflare-update interval=7d start-time=03:31:00 \
+#    on-event="/system script run cloudflare-ip-updater" \
+#    policy=read,write,test
 
 :local url "https://www.cloudflare.com/ips-v4/"
 :local listName "CF"

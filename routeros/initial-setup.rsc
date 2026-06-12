@@ -131,3 +131,14 @@ add name=routerboard_fwupgrade policy=reboot,read,write,sensitive start-time=sta
     \n:delay 15s\r\
     \n/system reboot\r\
     \n}"
+
+# ---------------------------------------------------------------------------
+# OSPF routing filters — accept only local (RFC1918) prefixes in/out
+# ---------------------------------------------------------------------------
+/routing filter rule
+add chain=ospf-in disabled=no rule="if (dst in 192.168.0.0/16 && dst-len in 16-32) {accept;}"
+add chain=ospf-in disabled=no rule="if (dst in 10.0.0.0/8 && dst-len in 8-32) {accept;}"
+add chain=ospf-in disabled=no rule="if (dst in 172.16.0.0/12 && dst-len in 12-32) {accept;}"
+add chain=ospf-out disabled=no rule="if (dst in 192.168.0.0/16 && dst-len in 16-32) {accept;}"
+add chain=ospf-out disabled=no rule="if (dst in 10.0.0.0/8 && dst-len in 8-32) {accept;}"
+add chain=ospf-out disabled=no rule="if (dst in 172.16.0.0/12 && dst-len in 12-32) {accept;}"

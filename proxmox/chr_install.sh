@@ -19,6 +19,7 @@ VM_SOCKETS=1
 VM_CORES=1
 VM_BRIDGE="vmbr0"
 VM_STORAGE="local"
+VM_DISK_EXTRA="256M"   # extra space added to the CHR disk when none is entered
 
 #### helpers
 
@@ -144,16 +145,21 @@ IMG_DIR="/var/lib/vz/images/$vmID"
 echo "-- Creating VM image dir!"
 mkdir -p "$IMG_DIR" || die "Could not create $IMG_DIR"
 
-read -r -p "Please input extra image size in GB (0 for none): " imgsize
-[[ "$imgsize" =~ ^[0-9]+$ ]] || die "Image size must be a non-negative number: '$imgsize'"
+read -r -p "Extra disk size to add (e.g. 256M, 1G; Enter = $VM_DISK_EXTRA, 0 = none): " imgsize
+imgsize="${imgsize:-$VM_DISK_EXTRA}"
+imgsize="${imgsize^^}"                                  # normalise suffix case (256m -> 256M)
+[[ "$imgsize" =~ ^[0-9]+$ ]] && imgsize="${imgsize}G"   # a bare number means GB
+[[ "$imgsize" =~ ^[0-9]+[KMGT]$ ]] || die "Invalid disk size: '$imgsize' (use e.g. 256M, 1G or 0)"
 
 disk="$IMG_DIR/vm-$vmID-disk-0.qcow2"
 echo "-- Converting image to qcow2 format"
 qemu-img convert -f raw -O qcow2 "$img" "$disk" || die "qemu-img convert failed"
 
-if [ "$imgsize" -ne 0 ]; then
-   echo "-- Resizing image by +${imgsize}G"
-   qemu-img resize "$disk" "+${imgsize}G" || die "qemu-img resize failed"
+if [ "${imgsize%[KMGT]}" -ne 0 ]; then
+   echo "-- Resizing image by +$imgsize"
+   qemu-img resize "$disk" "+$imgsize" || die "qemu-img resize failed"
+else
+   echo "-- No disk resize requested."
 fi
 
 #### 6. create the VM

@@ -107,8 +107,14 @@ add chain=forward dst-address-list=TG action=accept comment="allow Telegram"
 
 ## Возможные проблемы
 
-> [!bug]- Fetch ругается на сертификат
-> На старых сборках добавь `check-certificate=no` в команду `fetch` внутри скрипта.
+> [!bug]- Telegram IP updater: Fetch failed
+> Скрипт уже использует `check-certificate=no`, поэтому TLS обычно не виноват. Проверь причину вручную:
+> ```routeros
+> /tool fetch url="https://core.telegram.org/resources/cidr.txt" output=user as-value
+> ```
+> - `could not resolve` → нет DNS: `/ip dns set servers=1.1.1.1,8.8.8.8`
+> - `host unreachable` / `timeout` → у роутера нет маршрута/интернета
+> - `tls` / `certificate` → импортируй CA или оставь `check-certificate=no`
 
 > [!bug]- `as-value` не поддерживается
 > RouterOS до 6.43 не умеет `fetch output=user as-value`. Нужна версия 6.43+ либо файловый вариант скрипта.

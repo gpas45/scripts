@@ -82,6 +82,12 @@ add action=add-src-to-address-list address-list="black-list attackers" address-l
 add action=drop chain=detect-intrusion src-address-list="black-list attackers"
 
 # ---------------------------------------------------------------------------
+# Firewall NAT
+# ---------------------------------------------------------------------------
+/ip firewall nat
+add action=masquerade chain=srcnat comment="LAN -> Internet" out-interface-list=WAN
+
+# ---------------------------------------------------------------------------
 # DNS — resolver for LAN / VPN / StS clients
 # ---------------------------------------------------------------------------
 /ip dns
@@ -99,7 +105,7 @@ set www disabled=yes
 set api disabled=yes
 set api-ssl disabled=yes
 /ip neighbor discovery-settings
-set discover-interface-list=none
+set discover-interface-list=LAN
 # MAC-server is left enabled on all interfaces so the router stays reachable
 # via MAC-telnet / MAC-winbox during initial setup from any port, before it has
 # an IP address. NOTE: this also exposes MAC access on WAN — restrict to a
@@ -131,7 +137,7 @@ set enabled=yes
 # Logging — suppress info-level messages for DHCP and Wireless
 # ---------------------------------------------------------------------------
 /system logging
-set [find where topics="info"] topics=info,!dhcp,!wireless
+set [find where topics="info"] topics=info,!dhcp,!wireless,!wifi
 
 # ---------------------------------------------------------------------------
 # RouterBOARD firmware auto-upgrade

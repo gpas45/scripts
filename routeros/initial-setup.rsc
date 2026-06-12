@@ -123,6 +123,16 @@ set enabled=yes
 /system ntp client servers
 add address=pool.ntp.org
 
+# Act as an NTP server for downstream clients.
+/system ntp server
+set enabled=yes
+
+# ---------------------------------------------------------------------------
+# Logging — suppress info-level messages for DHCP and Wireless
+# ---------------------------------------------------------------------------
+/system logging
+set [find where topics="info"] topics=info,!dhcp,!wireless
+
 # ---------------------------------------------------------------------------
 # RouterBOARD firmware auto-upgrade
 # Upgrades the RouterBOARD firmware on startup when a newer one is available,

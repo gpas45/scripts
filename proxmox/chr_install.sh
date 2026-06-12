@@ -50,6 +50,33 @@ version_exists() {
    wget -q --spider "${MIKROTIK_DL}/$1/chr-$1.img.zip"
 }
 
+# list_guests — print every guest (VMs and containers) in one aligned table
+# sorted by ID. qm/pct have different column layouts, so we normalise both to:
+#   ID  TYPE  STATUS  NAME
+list_guests() {
+   {
+      printf 'ID\tTYPE\tSTATUS\tNAME\n'
+      {
+         # qm list: ID NAME STATUS MEM BOOTDISK PID — NAME may contain spaces,
+         # but the trailing three columns are always MEM/BOOTDISK/PID, so STATUS
+         # is the field before them and NAME is everything in between.
+         qm list 2>/dev/null | awk 'NR>1 && $1 ~ /^[0-9]+$/ {
+            name=""; for (i=2; i<=NF-4; i++) name = name (name=="" ? "" : " ") $i
+            printf "%s\tqemu\t%s\t%s\n", $1, $(NF-3), name
+         }'
+         # pct list: ID Status [Lock] Name — Name is always the last column.
+         pct list 2>/dev/null | awk 'NR>1 && $1 ~ /^[0-9]+$/ {
+            printf "%s\tlxc\t%s\t%s\n", $1, $2, $NF
+         }'
+      } | sort -n
+   } | awk -F'\t' '
+      { for (i=1;i<=NF;i++) { cell[NR,i]=$i; if (length($i)>w[i]) w[i]=length($i) }
+        if (NF>cols) cols=NF }
+      END { for (r=1;r<=NR;r++) { line=""
+               for (c=1;c<=cols;c++) line=line sprintf("%-*s  ", w[c], cell[r,c])
+               sub(/ +$/,"",line); print line } }'
+}
+
 echo "############## Start of Script ##############"
 
 #### 1. temp dir
@@ -102,10 +129,8 @@ fi
 [ -f "$img" ] || die "CHR $version image file is missing after download!"
 
 #### 4. choose a free VM ID
-echo "== Printing list of VM's on this hypervisor!"
-qm list
-echo "== Printing list of CT's on this hypervisor!"
-pct list
+echo "== Existing guests on this hypervisor (VMs and containers):"
+list_guests
 echo ""
 read -r -p "Please enter free VM ID to use: " vmID
 echo ""

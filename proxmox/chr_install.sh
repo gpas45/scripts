@@ -46,12 +46,15 @@ valid_version() {
 }
 
 # fetch_channel CHANNEL — print the newest version for a RouterOS channel.
-# CHANNEL is one of: stable, long-term, testing. Prints empty on failure.
+# CHANNEL is one of: stable, long-term, testing. Prints empty on failure or
+# when the channel returns a placeholder (e.g. "0.00" for an empty branch).
 fetch_channel() {
-   local channel="$1" line
-   # The NEWESTv7.<channel> file contains: "<version> <unix-timestamp>"
-   line="$(wget -qO- "${MIKROTIK_UPG}/NEWESTv7.${channel}" 2>/dev/null || true)"
-   echo "${line%% *}"
+   local channel="$1" line ver
+   # The NEWEST7.<channel> file contains: "<version> <unix-timestamp>"
+   line="$(wget -qO- "${MIKROTIK_UPG}/NEWEST7.${channel}" 2>/dev/null || true)"
+   ver="${line%% *}"
+   # Only accept a real release (major version >= 1); reject empty / "0.00".
+   [[ "$ver" =~ ^[1-9][0-9]*\.[0-9]+(\.[0-9]+)?$ ]] && echo "$ver"
 }
 
 echo "############## Start of Script ##############"

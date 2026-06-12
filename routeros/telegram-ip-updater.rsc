@@ -18,12 +18,14 @@
 # это убирает создание/удаление файла, ожидание загрузки и проверки файла.
 :local content ""
 :do {
-    :local result [/tool fetch url=$url output=user as-value]
+    # check-certificate=no — список публичный, а на роутере может не быть
+    # импортированного CA-хранилища, из-за чего HTTPS-fetch падает на TLS.
+    :local result [/tool fetch url=$url check-certificate=no output=user as-value]
     :if (($result->"status") = "finished") do={
         :set content ($result->"data")
     }
 } on-error={
-    :log error "Telegram IP updater: Fetch failed"
+    :log error "Telegram IP updater: Fetch failed (check DNS / internet / TLS)"
     :error "Fetch failed"
 }
 

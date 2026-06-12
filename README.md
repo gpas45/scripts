@@ -69,6 +69,7 @@ zabbix/    Шаблоны Zabbix
 | `check-isp.rsc` | Проверка доступности двух провайдеров пингом и сброс соединений упавшего канала (для dual-WAN). |
 | `cloudflare-ip-updater.rsc` | Обновление address-list `CF` актуальными IPv4-подсетями Cloudflare (по расписанию). |
 | `telegram-ip-updater.rsc` | Обновление address-list `TG` актуальными IPv4-подсетями Telegram (по расписанию). |
+| `google-ip-updater.rsc` | Обновление address-list `VPN_ytb` актуальными IPv4-диапазонами Google (goog.json) — для policy-routing на Google/YouTube (по расписанию). |
 | `ospf_filter_rules` | Фильтры OSPF: принимать только частные подсети (RFC 1918). |
 | `routerboard_fwupgrade` | Задание планировщика: автообновление прошивки RouterBOARD с перезагрузкой. |
 | `routerboard_starwars` | Имперский марш на системном динамике после загрузки. |

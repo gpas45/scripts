@@ -97,9 +97,9 @@ echo "## Preparing for image download and VM creation!"
 echo "-- Current Long-term / Stable releases are listed at https://mikrotik.com/download"
 
 while true; do
-   read -r -p "Please input CHR version to deploy (e.g. 7.18.2): " version
+   read -r -p "Please input CHR version to deploy (e.g. 7.21.4): " version
    if ! valid_version "$version"; then
-      echo "-- Invalid version format, please try again (e.g. 7.18.2)."
+      echo "-- Invalid version format, please try again (e.g. 7.21.4)."
       continue
    fi
    # An already-downloaded image is good enough; otherwise confirm it exists.

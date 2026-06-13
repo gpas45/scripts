@@ -7,7 +7,7 @@
 # Basic connectivity (per-deployment — adjust address / gateway)
 # ---------------------------------------------------------------------------
 /ip address
-add address=10.0.0.2/24 interface=ether1 comment="CHANGE_ME: address issued by ISP"
+add address= interface=ether1 network=10.0.0.1 comment="address issued by ISP"
 /ip route
 add dst-address=0.0.0.0/0 gateway=10.0.0.1 comment="CHANGE_ME: default gateway"
 /ip dhcp-client

@@ -56,7 +56,7 @@ add action=accept chain=input comment="accept management" connection-state=new d
 add action=accept chain=input comment="accept LAN" in-interface-list=LAN
 add action=accept chain=input comment="accept StS" in-interface-list=StS
 add action=accept chain=input comment="accept VPN" in-interface-list=VPN
-add action=drop chain=input comment="drop all other" log-prefix="IN DROP"
+add action=passthrough chain=input comment="drop all other" log-prefix="IN DROP"
 add action=accept chain=forward comment="accept established, related connections" connection-state=established,related
 add action=drop chain=forward comment="drop invalid connections" connection-state=invalid log-prefix="INV FWD"
 add action=accept chain=forward comment="accept DST-NAT" connection-nat-state=dstnat
@@ -67,7 +67,7 @@ add action=accept chain=forward comment="LAN -> StS" in-interface-list=LAN out-i
 add action=accept chain=forward comment="LAN -> VPN" in-interface-list=LAN out-interface-list=VPN
 add action=accept chain=forward comment="StS -> LAN" in-interface-list=StS out-interface-list=LAN
 add action=accept chain=forward comment="VPN -> LAN" in-interface-list=VPN out-interface-list=LAN
-add action=drop chain=forward comment="drop all other" log-prefix=FWD
+add action=passthrough chain=forward comment="drop all other" log-prefix=FWD
 add action=accept chain=icmp comment="echo request" icmp-options=8:0 protocol=icmp
 add action=accept chain=icmp comment="echo reply" icmp-options=0:0 protocol=icmp
 add action=accept chain=icmp comment="net unreachable" icmp-options=3:3 protocol=icmp

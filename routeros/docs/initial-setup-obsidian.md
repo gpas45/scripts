@@ -27,7 +27,13 @@ aliases:
 > - Учтите последовательность port knocking: **1234 → 2345 → 3456**, затем подключение на порт **12345**.
 
 > [!danger] Не заблокируйте себя
-> Firewall спроектирован как **default-drop**: всё, что не разрешено явно, отбрасывается. Доступ к управлению с WAN открывается только через port knocking. Перед импортом убедитесь, что у вас есть доступ из `LAN` (он разрешён правилом `accept LAN`).
+> Доступ к управлению с WAN открывается только через port knocking. Перед импортом убедитесь, что у вас есть доступ из `LAN` (он разрешён правилом `accept LAN`).
+
+> [!warning] Финальные правила — `passthrough`, а не `drop`
+> Замыкающие правила цепочек `input`/`forward` имеют `action=passthrough` (с комментарием «drop all other»): они **считают и логируют** нежелательный трафик, но **не отбрасывают** его. Это режим наблюдения — удобно «обкатать» правила, ничего не заблокировав. Чтобы включить полноценный **default-drop**, поменяйте `passthrough` на `drop` в этих двух правилах:
+> ```routeros
+> /ip firewall filter set [find comment="drop all other"] action=drop
+> ```
 
 ---
 
@@ -37,7 +43,7 @@ aliases:
 |---|---|
 | `/interface bridge` | Создаёт `bridge` (порты добавляются отдельно). |
 | `/interface list` + `member` | Списки `WAN`/`LAN`/`StS`/`VPN`, в LAN — `bridge`, в WAN — `ether1`. |
-| `/ip firewall filter` | Цепочки `input`/`forward`/`icmp`/`pk`/`detect-intrusion`: established/related, drop invalid, port knocking, anti-bruteforce, ICMP-фильтр, межсегментные разрешения, финальный **drop**. |
+| `/ip firewall filter` | Цепочки `input`/`forward`/`icmp`/`pk`/`detect-intrusion`: established/related, drop invalid, port knocking, anti-bruteforce, ICMP-фильтр, межсегментные разрешения, финальный **passthrough** (счёт/лог; см. предупреждение ниже). |
 | `/ip firewall nat` | `masquerade` для LAN → Internet через `WAN`. |
 | `/ip dns` | Резолвер для LAN/VPN/StS (`allow-remote-requests`, серверы 1.1.1.1/8.8.8.8). |
 | `/ip service` | Отключает `telnet/ftp/www/api/api-ssl`. |
@@ -101,7 +107,7 @@ nc -z -w1 ROUTER_IP 12345
 ```
 
 > [!success] Ожидаемый результат
-> Заполненные interface-lists, цепочки firewall с финальным `drop`, активный NAT и DNS-резолвер, заданный scheduler обновления прошивки.
+> Заполненные interface-lists, цепочки firewall с финальным `passthrough`, активный NAT и DNS-резолвер, заданный scheduler обновления прошивки.
 
 ---
 

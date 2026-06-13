@@ -37,21 +37,19 @@ confirm_overwrite() {
   [[ "$ans" == [Yy] ]]
 }
 
-apply_param() {
-  local -n _psql_ref="$1"
-  local name="$2"
-  local value="$3"
-  local esc="${value//\'/\'\'}"
-  "${_psql_ref[@]}" -c "ALTER SYSTEM SET ${name} = '${esc}';" >/dev/null
+write_cfg_json() {
+  # Генерирует JSON-конфиг с корректным экранированием значений.
+  # Аргументы: путь, далее пары «ключ значение».
+  local file="$1"; shift
+  python3 - "$file" "$@" <<'PY'
+import json, sys
+path, args = sys.argv[1], sys.argv[2:]
+obj = {args[i]: args[i + 1] for i in range(0, len(args), 2)}
+with open(path, "w", encoding="utf-8") as f:
+    json.dump(obj, f, indent=2, ensure_ascii=False)
+    f.write("\n")
+PY
 }
-
-# ── Цвета ────────────────────────────────────────────────────────────────────
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-CYAN='\033[0;36m'
-BOLD='\033[1m'
-RESET='\033[0m'
 
 # =============================================================================
 # ИМЯ СЕРВИСА SYSTEMD
@@ -134,6 +132,7 @@ print_cluster_summary() {
       avail_status="OK"
       pgdata="$(psql -h /tmp -p "$port" -U postgres -d postgres \
         -At -q -X -c "SHOW data_directory;" 2>/dev/null)" || pgdata=""
+      [[ -n "$pgdata" ]] && CLUSTER_PGDATA["$port"]="$pgdata"
     else
       avail_status="!!"
       pgdata=""
@@ -331,11 +330,18 @@ configure_pg_instance() {
     return 0
   fi
 
+  # Все ALTER SYSTEM применяем одним вызовом psql (ON_ERROR_STOP=1 — атомарно).
+  local sql=""
   for p in "${TO_CHANGE[@]}"; do
-    if ! apply_param PSQL "$p" "${WANT[$p]}"; then
-      echo "ERROR: не удалось установить параметр '${p}' ${pgport}" >&2
-      return 1
-    fi
+    local esc="${WANT[$p]//\'/\'\'}"
+    sql+="ALTER SYSTEM SET ${p} = '${esc}';"$'\n'
+  done
+
+  if ! "${PSQL[@]}" -c "$sql" >/dev/null; then
+    echo "ERROR: не удалось применить параметры PostgreSQL ${pgport}" >&2
+    return 1
+  fi
+  for p in "${TO_CHANGE[@]}"; do
     echo "  SET ${p}"
   done
 
@@ -360,6 +366,14 @@ configure_pg_instance() {
 WALG_DIR='/etc/wal-g.d'
 WALG_COMPRESSION_METHOD='brotli'
 
+# Кэш PGDATA: заполняется при обзоре кластеров, переиспользуется в шаге 7.
+declare -A CLUSTER_PGDATA=()
+
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "ERROR: python3 не найден в PATH (требуется для генерации конфига)" >&2
+  exit 1
+fi
+
 # =============================================================================
 # ШАГ 1: ОБНАРУЖЕНИЕ И ВЫВОД СПИСКА КЛАСТЕРОВ
 # =============================================================================
@@ -368,8 +382,7 @@ FOUND_PORTS=()
 if command -v ss >/dev/null 2>&1; then
   mapfile -t FOUND_PORTS < <(ss -tlnp 2>/dev/null \
     | grep postgres \
-    | grep -oP ':\d+' \
-    | grep -oP '\d+' \
+    | grep -oP ':\K\d+' \
     | sort -u)
 fi
 
@@ -482,8 +495,12 @@ for PGPORT in "${SELECTED_PORTS[@]}"; do
     continue
   fi
 
-  PGDATA="$(psql -h /tmp -p "$PGPORT" -U postgres -d postgres -At -q -X \
-    -c "SHOW data_directory;" 2>/dev/null)" || true
+  if [[ -n "${CLUSTER_PGDATA[$PGPORT]+x}" ]]; then
+    PGDATA="${CLUSTER_PGDATA[$PGPORT]}"
+  else
+    PGDATA="$(psql -h /tmp -p "$PGPORT" -U postgres -d postgres -At -q -X \
+      -c "SHOW data_directory;" 2>/dev/null)" || true
+  fi
 
   if [[ -z "$PGDATA" || ! -d "$PGDATA" ]]; then
     echo "WARN: не удалось определить PGDATA для порта ${PGPORT}, пропуск" >&2
@@ -510,33 +527,27 @@ for PGPORT in "${SELECTED_PORTS[@]}"; do
   fi
 
   if [[ "$BACKEND" == "s3" ]]; then
-    cat > "$CFG" <<EOF
-{
-  "AWS_ENDPOINT":            "${AWS_ENDPOINT}",
-  "AWS_REGION":              "${AWS_REGION}",
-  "WALG_S3_PREFIX":          "${S3_BUCKET}/${PGPORT}",
-  "AWS_ACCESS_KEY_ID":       "${AWS_ACCESS_KEY_ID}",
-  "AWS_SECRET_ACCESS_KEY":   "${AWS_SECRET_ACCESS_KEY}",
-  "WALG_COMPRESSION_METHOD": "${WALG_COMPRESSION_METHOD}",
-  "WALG_DELTA_MAX_STEPS":    "${WALG_DELTA_MAX_STEPS}",
-  "PGPORT":                  "${PGPORT}",
-  "PGHOST":                  "/tmp",
-  "PGDATA":                  "${PGDATA}",
-  "PGSSLMODE":               "disable"
-}
-EOF
+    ( umask 077; write_cfg_json "$CFG" \
+      AWS_ENDPOINT            "$AWS_ENDPOINT" \
+      AWS_REGION              "$AWS_REGION" \
+      WALG_S3_PREFIX          "${S3_BUCKET}/${PGPORT}" \
+      AWS_ACCESS_KEY_ID       "$AWS_ACCESS_KEY_ID" \
+      AWS_SECRET_ACCESS_KEY   "$AWS_SECRET_ACCESS_KEY" \
+      WALG_COMPRESSION_METHOD "$WALG_COMPRESSION_METHOD" \
+      WALG_DELTA_MAX_STEPS    "$WALG_DELTA_MAX_STEPS" \
+      PGPORT                  "$PGPORT" \
+      PGHOST                  "/tmp" \
+      PGDATA                  "$PGDATA" \
+      PGSSLMODE               "disable" )
   else
-    cat > "$CFG" <<EOF
-{
-  "WALG_FILE_PREFIX":        "${WALG_FILE_PREFIX_BASE}/${PGPORT}",
-  "WALG_COMPRESSION_METHOD": "${WALG_COMPRESSION_METHOD}",
-  "WALG_DELTA_MAX_STEPS":    "${WALG_DELTA_MAX_STEPS}",
-  "PGPORT":                  "${PGPORT}",
-  "PGHOST":                  "/tmp",
-  "PGDATA":                  "${PGDATA}",
-  "PGSSLMODE":               "disable"
-}
-EOF
+    ( umask 077; write_cfg_json "$CFG" \
+      WALG_FILE_PREFIX        "${WALG_FILE_PREFIX_BASE}/${PGPORT}" \
+      WALG_COMPRESSION_METHOD "$WALG_COMPRESSION_METHOD" \
+      WALG_DELTA_MAX_STEPS    "$WALG_DELTA_MAX_STEPS" \
+      PGPORT                  "$PGPORT" \
+      PGHOST                  "/tmp" \
+      PGDATA                  "$PGDATA" \
+      PGSSLMODE               "disable" )
   fi
 
   chmod 600 "$CFG"

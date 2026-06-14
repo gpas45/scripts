@@ -23,6 +23,32 @@ log_warn()    { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 log_error()   { echo -e "${RED}[ERROR]${NC} $*" >&2; }
 log_section() { echo -e "\n${CYAN}${BOLD}>>> $* ${NC}"; }
 
+# Имя systemd-юнита (как в wal-g-cfg.sh): для 5432 — без инстанса,
+# для прочих портов — шаблонный юнит postgrespro-<ver>@<port>.
+get_service_name() {
+  local pgver="$1" pgport="$2"
+  if [[ "$pgport" == "5432" ]]; then
+    echo "postgrespro-${pgver}.service"
+  else
+    echo "postgrespro-${pgver}@${pgport}.service"
+  fi
+}
+
+# Чтение значения ключа из JSON-конфига wal-g (через python3, если доступен).
+get_cfg_value() {
+  local cfg="$1" key="$2"
+  command -v python3 >/dev/null 2>&1 || return 1
+  python3 - "$cfg" "$key" <<'PY'
+import json, sys
+try:
+    with open(sys.argv[1], encoding="utf-8") as f:
+        val = json.load(f).get(sys.argv[2], "")
+    print(str(val).strip())
+except Exception:
+    sys.exit(1)
+PY
+}
+
 # =============================================================================
 # Шаг 1: Выбор порта / конфига
 # =============================================================================
@@ -69,8 +95,15 @@ log_info "Конфиг:      ${BOLD}$WALG_CONFIG_FILE${NC}"
 # =============================================================================
 log_section "Определение PGDATA"
 
-RESTORE_PGDATA="/var/lib/pgpro/${PGVER}/data-${PGPORT}"
-log_info "PGDATA по умолчанию: ${BOLD}$RESTORE_PGDATA${NC}"
+# Приоритет — PGDATA из конфига (там записан фактический путь кластера);
+# если получить не удалось, используем путь по умолчанию.
+RESTORE_PGDATA="$(get_cfg_value "$WALG_CONFIG_FILE" PGDATA 2>/dev/null || true)"
+if [[ -n "$RESTORE_PGDATA" ]]; then
+    log_info "PGDATA из конфига: ${BOLD}$RESTORE_PGDATA${NC}"
+else
+    RESTORE_PGDATA="/var/lib/pgpro/${PGVER}/data-${PGPORT}"
+    log_warn "PGDATA из конфига не получен; путь по умолчанию: ${BOLD}$RESTORE_PGDATA${NC}"
+fi
 
 read -rp "Использовать этот путь? [Y/n]: " CONFIRM_DATA
 if [[ "${CONFIRM_DATA,,}" == "n" ]]; then
@@ -112,9 +145,14 @@ while true; do
             break
             ;;
         3)
-            BACKUP_NAME="LATEST"
-            read -rp "Введите дату/время (формат: YYYY-MM-DD HH:MM:SS): " PITR_TARGET
+            read -rp "Введите дату/время (формат: YYYY-MM-DD HH:MM:SS [TZ]): " PITR_TARGET
             [[ -z "$PITR_TARGET" ]] && { log_warn "Время не может быть пустым."; continue; }
+            # Базовый бэкап должен быть СТАРШЕ целевого времени, иначе PostgreSQL
+            # не сможет докатиться до точки восстановления. LATEST подходит, только
+            # если последний бэкап сделан раньше PITR_TARGET.
+            log_warn "Базовый бэкап должен быть сделан РАНЬШЕ целевого времени восстановления."
+            read -rp "Имя базового бэкапа [LATEST]: " BACKUP_NAME
+            BACKUP_NAME="${BACKUP_NAME:-LATEST}"
             break
             ;;
         *)
@@ -128,7 +166,7 @@ done
 # =============================================================================
 log_section "Предварительные проверки"
 
-SERVICE_NAME="postgresql-${PGVER}-${PGPORT}"
+SERVICE_NAME="$(get_service_name "$PGVER" "$PGPORT")"
 
 if systemctl is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
     log_warn "Сервис ${BOLD}$SERVICE_NAME${NC} запущен!"
@@ -211,16 +249,29 @@ log_section "Настройка recovery"
 su - postgres -c "touch $RESTORE_PGDATA/recovery.signal"
 log_info "Создан recovery.signal"
 
-if [[ -n "${PITR_TARGET:-}" ]]; then
-    RECOVERY_CONF="$RESTORE_PGDATA/postgresql.auto.conf"
-    log_info "Добавляю PITR параметры в $RECOVERY_CONF"
-    cat >> "$RECOVERY_CONF" <<EOF
+# restore_command нужен ВСЕГДА: без него PostgreSQL не сможет дотянуть WAL из
+# архива и не дойдёт до согласованного состояния (а PITR не сработает вовсе).
+# Формат совпадает с тем, что прописывает wal-g-cfg.sh.
+RECOVERY_CONF="$RESTORE_PGDATA/postgresql.auto.conf"
+RESTORE_CMD="/usr/bin/wal-g wal-fetch \"%f\" \"%p\" --config ${WALG_CONFIG_FILE} >> ${LOG_DIR}/restore_command.log 2>&1"
 
-# --- WAL-G PITR restore ---
+log_info "Прописываю restore_command в $RECOVERY_CONF"
+cat >> "$RECOVERY_CONF" <<EOF
+
+# --- WAL-G restore (добавлено wal-g-restore.sh $(date '+%F %T')) ---
+restore_command = '${RESTORE_CMD}'
+EOF
+
+if [[ -n "${PITR_TARGET:-}" ]]; then
+    log_info "Добавляю PITR-параметры (до $PITR_TARGET)"
+    cat >> "$RECOVERY_CONF" <<EOF
 recovery_target_time = '${PITR_TARGET}'
 recovery_target_action = 'promote'
+recovery_target_timeline = 'latest'
 EOF
     log_info "PITR настроен до: $PITR_TARGET"
+else
+    log_info "Полное восстановление: WAL проигрывается до конца архива."
 fi
 
 chown -R postgres:postgres "$RESTORE_PGDATA"

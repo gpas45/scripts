@@ -51,6 +51,7 @@ PGVER="${PGVER:-}"
 TIMEZONE="${TIMEZONE:-Asia/Yekaterinburg}"
 PG_LOCALE="${PG_LOCALE:-ru_RU.UTF-8}"
 POSTGRES_PASS="${POSTGRES_PASS:-}"
+PG_PORT="${PG_PORT:-}"          # порт базового кластера (пусто = 5432, спросим если занят)
 
 # Часто используемые версии Postgres Pro 1C (для меню выбора)
 SUGGESTED_VERSIONS=("1c-18" "1c-17" "1c-16" "1c-15" "1c-14")
@@ -79,6 +80,31 @@ pg_major() {
 # Пути по версии
 pg_bin()  { echo "/opt/pgpro/${1}/bin"; }
 pg_data() { echo "/var/lib/pgpro/${1}/data"; }
+
+# Реальный порт кластера: сперва PGPORT из файла окружения,
+# затем port = из postgresql.auto.conf / postgresql.conf, иначе fallback.
+# resolve_port <env_file> <pgdata> <fallback>
+resolve_port() {
+    local env_file="$1" pgdata="$2" fallback="${3:-5432}" p="" cf
+    if [[ -f "$env_file" ]]; then
+        p=$(grep -E "^PGPORT=" "$env_file" 2>/dev/null | head -1 | sed "s/^PGPORT=//;s/['\"]//g")
+    fi
+    if [[ -z "$p" && -n "$pgdata" ]]; then
+        for cf in "${pgdata}/postgresql.auto.conf" "${pgdata}/postgresql.conf"; do
+            [[ -f "$cf" ]] || continue
+            p=$(grep -E "^[[:space:]]*port[[:space:]]*=" "$cf" 2>/dev/null | tail -1 \
+                | sed -E "s/^[[:space:]]*port[[:space:]]*=[[:space:]]*([0-9]+).*/\1/")
+            [[ -n "$p" ]] && break
+        done
+    fi
+    echo "${p:-$fallback}"
+}
+
+# Порт занят? (слушается локально)
+port_in_use() {
+    ss -tlnH "sport = :${1}" 2>/dev/null | grep -q . \
+        || ss -tlnp 2>/dev/null | grep -q ":${1} "
+}
 
 # ───────────────────────────────────────────────
 # ВЫБОР ВЕРСИИ
@@ -169,12 +195,13 @@ list_instances() {
         )
         for f in "${files[@]}"; do
             base=$(basename "$f")
+            pgdata=$(grep -E "^PGDATA=" "$f" 2>/dev/null | head -1 | sed "s/^PGDATA=//;s/['\"]//g")
             if [[ "$base" == "postgrespro-${ver}" ]]; then
-                port="5432"; svc="postgrespro-${ver}"
+                # Базовый кластер: реальный порт из env/конфига (не всегда 5432).
+                port="$(resolve_port "$f" "$pgdata" 5432)"; svc="postgrespro-${ver}"
             else
                 port="${base##postgrespro-"${ver}"-}"; svc="postgrespro-${ver}@${port}"
             fi
-            pgdata=$(grep -E "^PGDATA=" "$f" 2>/dev/null | head -1 | sed "s/^PGDATA=//;s/['\"]//g")
             if systemctl is-active --quiet "${svc}" 2>/dev/null; then
                 status="${GREEN}running${RESET}"
             elif systemctl is-enabled --quiet "${svc}" 2>/dev/null; then
@@ -268,6 +295,26 @@ cmd_install() {
         confirm "Продолжить всё равно?" || { log "Отменено."; return 0; }
     fi
 
+    # Порт базового кластера. По умолчанию 5432; если он занят (например, уже
+    # установлена другая версия) — кластер на 5432 не запустится, поэтому
+    # запрашиваем свободный порт и прописываем его в postgresql.conf.
+    local INSTALL_PORT="${PG_PORT:-5432}"
+    if port_in_use "${INSTALL_PORT}"; then
+        warn "Порт ${INSTALL_PORT} уже занят (вероятно, другим кластером Postgres Pro)."
+        if [[ -t 0 ]]; then
+            while true; do
+                read -rp "$(echo -e "${CYAN}Порт для нового кластера${RESET} [5433]: ")" INSTALL_PORT
+                INSTALL_PORT="${INSTALL_PORT:-5433}"
+                [[ "$INSTALL_PORT" =~ ^[0-9]{4,5}$ ]] || { warn "Некорректный порт."; continue; }
+                port_in_use "${INSTALL_PORT}" && { warn "Порт ${INSTALL_PORT} занят."; continue; }
+                break
+            done
+        else
+            die "Порт ${INSTALL_PORT} занят. Укажите свободный: PG_PORT=NNNN."
+        fi
+    fi
+    log "Порт кластера: ${INSTALL_PORT}"
+
     # Доп. шаги (по умолчанию включены, как было выбрано)
     local DO_OS=1 DO_IPV6=1
     if [[ -t 0 ]]; then
@@ -314,6 +361,17 @@ cmd_install() {
     log "Инициализация: initdb --tune=1c --locale=${PG_LOCALE}"
     "${PG_BIN}/pg-setup" initdb --tune=1c --locale="${PG_LOCALE}"
 
+    # Если порт не 5432 — прописываем его в postgresql.conf до старта.
+    if [[ "${INSTALL_PORT}" != "5432" ]]; then
+        log "Установка порта ${INSTALL_PORT} в postgresql.conf"
+        local conf="${PG_DATA}/postgresql.conf"
+        if grep -qE '^[[:space:]]*#?[[:space:]]*port[[:space:]]*=' "${conf}"; then
+            sed -ri "0,/^[[:space:]]*#?[[:space:]]*port[[:space:]]*=.*/s//port = ${INSTALL_PORT}/" "${conf}"
+        else
+            echo "port = ${INSTALL_PORT}" >> "${conf}"
+        fi
+    fi
+
     # Контрольные суммы страниц: PG 10–16 включаем вручную, 17+ уже по умолчанию
     if [[ "${PG_MAJOR}" =~ ^[0-9]+$ ]] && (( PG_MAJOR < 17 )); then
         log "Включение контрольных сумм страниц (PG ${PG_MAJOR} < 17)"
@@ -327,12 +385,19 @@ cmd_install() {
     systemctl enable "${PG_SERVICE}"
     systemctl start "${PG_SERVICE}"
 
+    # Ожидание готовности кластера на выбранном порту
+    local timeout=30 elapsed=0
+    until su - postgres -c "${PG_BIN}/pg_isready -p ${INSTALL_PORT}" >/dev/null 2>&1; do
+        sleep 1; (( elapsed++ )) || true
+        (( elapsed < timeout )) || die "Кластер не поднялся за ${timeout}с: journalctl -u ${PG_SERVICE}"
+    done
+
     # Пароль суперпользователя
     if [[ -z "${POSTGRES_PASS}" ]]; then
         POSTGRES_PASS="$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 20 || true)"
         log "Сгенерирован пароль пользователя postgres."
     fi
-    su - postgres -c "${PG_BIN}/psql -v ON_ERROR_STOP=1 -c \"ALTER USER postgres WITH PASSWORD '${POSTGRES_PASS}';\""
+    su - postgres -c "${PG_BIN}/psql -p ${INSTALL_PORT} -v ON_ERROR_STOP=1 -c \"ALTER USER postgres WITH PASSWORD '${POSTGRES_PASS}';\""
 
     # pg_hba: метод scram-sha-256 (как в статье)
     local PG_HBA="${PG_DATA}/pg_hba.conf"
@@ -340,7 +405,7 @@ cmd_install() {
         log "Настройка pg_hba.conf (scram-sha-256)"
         sed -ri 's/^(local\s+all\s+all\s+)(peer|trust|md5|ident)\b/\1scram-sha-256/' "${PG_HBA}"
         sed -ri 's/^(host\s+all\s+all\s+127\.0\.0\.1\/32\s+)(trust|md5|ident)\b/\1scram-sha-256/' "${PG_HBA}"
-        su - postgres -c "${PG_BIN}/psql -c 'SELECT pg_reload_conf();'" >/dev/null
+        su - postgres -c "${PG_BIN}/psql -p ${INSTALL_PORT} -c 'SELECT pg_reload_conf();'" >/dev/null
     fi
 
     # .pgpass для текущего (вызвавшего) пользователя
@@ -351,7 +416,7 @@ cmd_install() {
         log "Создание ${pgpass}"
         cat > "${pgpass}" <<EOF
 #hostname:port:database:username:password
-localhost:5432:postgres:postgres:${POSTGRES_PASS}
+localhost:${INSTALL_PORT}:postgres:postgres:${POSTGRES_PASS}
 EOF
         chmod 600 "${pgpass}"
         chown "$(id -u):$(id -g)" "${pgpass}" || true
@@ -359,15 +424,19 @@ EOF
 
     [[ "${DO_IPV6}" -eq 1 ]] && disable_ipv6
 
+    local psql_hint="${PG_BIN}/psql"
+    [[ "${INSTALL_PORT}" != "5432" ]] && psql_hint="${PG_BIN}/psql -p ${INSTALL_PORT}"
+
     header "✅ Установка Postgres Pro ${PGVER} завершена"
-    printf "  ${BOLD}%-14s${RESET} %s\n" "Версия:"  "${PGVER}"
-    printf "  ${BOLD}%-14s${RESET} %s\n" "Служба:"  "${PG_SERVICE}"
-    printf "  ${BOLD}%-14s${RESET} %s\n" "PGDATA:"  "${PG_DATA}"
-    printf "  ${BOLD}%-14s${RESET} %s\n" "Локаль:"  "${PG_LOCALE}"
-    printf "  ${BOLD}%-14s${RESET} %s\n" "Пароль postgres:" "${POSTGRES_PASS}"
+    printf "  ${BOLD}%-16s${RESET} %s\n" "Версия:"  "${PGVER}"
+    printf "  ${BOLD}%-16s${RESET} %s\n" "Служба:"  "${PG_SERVICE}"
+    printf "  ${BOLD}%-16s${RESET} %s\n" "Порт:"    "${INSTALL_PORT}"
+    printf "  ${BOLD}%-16s${RESET} %s\n" "PGDATA:"  "${PG_DATA}"
+    printf "  ${BOLD}%-16s${RESET} %s\n" "Локаль:"  "${PG_LOCALE}"
+    printf "  ${BOLD}%-16s${RESET} %s\n" "Пароль postgres:" "${POSTGRES_PASS}"
     echo ""
     echo "Проверка: systemctl status ${PG_SERVICE}"
-    echo "Подключение: su - postgres -c \"${PG_BIN}/psql\""
+    echo "Подключение: su - postgres -c \"${psql_hint}\""
 }
 
 # ───────────────────────────────────────────────

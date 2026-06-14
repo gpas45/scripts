@@ -8,13 +8,17 @@ set -euo pipefail
 WALG_DIR="/etc/wal-g.d"
 WALG_BIN="${WALG_BIN:-/usr/bin/wal-g}"
 
-# ── Цвета ────────────────────────────────────────────────────────────────────
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-CYAN='\033[0;36m'
-BOLD='\033[1m'
-RESET='\033[0m'
+# ── Цвета (только в интерактивный TTY и при отсутствии NO_COLOR) ──────────────
+if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
+  RED='\033[0;31m'
+  GREEN='\033[0;32m'
+  YELLOW='\033[1;33m'
+  CYAN='\033[0;36m'
+  BOLD='\033[1m'
+  RESET='\033[0m'
+else
+  RED='' GREEN='' YELLOW='' CYAN='' BOLD='' RESET=''
+fi
 
 # ── Проверка зависимостей ────────────────────────────────────────────────────
 if [[ ! -x "$WALG_BIN" ]]; then
@@ -45,6 +49,8 @@ print_usage() {
   echo "  --full, -f   показывать только FULL-бэкапы (без дифференциальных)"
   echo "  PORT         номер порта PostgreSQL (1–65535)"
   echo "  all          обработать все найденные конфиги"
+  echo
+  echo "  NO_COLOR=1   отключить ANSI-цвета принудительно"
 }
 
 POSITIONAL=()
@@ -97,7 +103,7 @@ print_menu() {
       echo -e "   ${BOLD}${i}.${RESET} [ ${RED}FAIL${RESET} ] Порт ${port} — конфиг недоступен"
     fi
 
-    (( i++ ))
+    i=$(( i + 1 ))
   done
 
   echo
@@ -106,7 +112,8 @@ print_menu() {
   echo
 }
 
-# ── Функция: запуск backup-list ──────────────────────────────────────────────
+# ── Функция: запуск backup-list для одного конфига ───────────────────────────
+# Возвращает 0 при успехе (включая «нет бэкапов»), 1 при сбое wal-g/конфига.
 run_backup_list() {
   local cfg="$1"
   local port
@@ -116,11 +123,60 @@ run_backup_list() {
   echo -e "${BOLD}=== WAL-G backup-list · Порт ${port} ===${RESET}"
   echo
 
-  if [[ "$FULL_ONLY" == "true" ]]; then
-    "$WALG_BIN" backup-list --pretty --config "$cfg" | grep -v "_D_"
-  else
-    "$WALG_BIN" backup-list --pretty --config "$cfg"
+  if [[ ! -r "$cfg" ]]; then
+    echo -e "${RED}ERROR: конфиг недоступен для чтения: ${cfg}${RESET}" >&2
+    return 1
   fi
+
+  # Захватываем вывод целиком, чтобы отделить сбой wal-g от пустого результата
+  # (иначе grep-фильтр без совпадений ложно трактуется как ошибка под pipefail).
+  local out rc
+  out="$("$WALG_BIN" backup-list --pretty --config "$cfg" 2>&1)"
+  rc=$?
+
+  if (( rc != 0 )); then
+    echo -e "${RED}ERROR: backup-list завершился с кодом ${rc}${RESET}" >&2
+    [[ -n "$out" ]] && echo "$out" >&2
+    return 1
+  fi
+
+  # Подсчёт: строки бэкапов содержат 'base_', delta — дополнительно '_D_'.
+  local total delta full
+  total="$(printf '%s\n' "$out" | grep -c 'base_' || true)"
+  delta="$(printf '%s\n' "$out" | grep -c '_D_'  || true)"
+  full=$(( total - delta ))
+
+  if (( total == 0 )); then
+    echo "  (бэкапы не найдены)"
+    echo
+    return 0
+  fi
+
+  # Вывод таблицы — с фильтром FULL-only или полностью.
+  if [[ "$FULL_ONLY" == "true" ]]; then
+    if (( full == 0 )); then
+      echo "  (FULL-бэкапов нет; всего delta: ${delta})"
+    else
+      printf '%s\n' "$out" | grep -v '_D_' || true
+    fi
+  else
+    printf '%s\n' "$out"
+  fi
+
+  # Сводка: счётчики + самый свежий бэкап (последняя строка таблицы).
+  local latest_line latest_name latest_date summary
+  latest_line="$(printf '%s\n' "$out" | grep 'base_' | tail -n1 || true)"
+  latest_name="$(printf '%s\n' "$latest_line" | grep -oE 'base_[0-9A-Za-z_]+' | head -n1 || true)"
+  latest_date="$(printf '%s\n' "$latest_line" \
+    | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}[T ][0-9]{2}:[0-9]{2}(:[0-9]{2})?' | head -n1 || true)"
+
+  summary="FULL: ${full} · delta: ${delta} · всего: ${total}"
+  [[ -n "$latest_name" ]] && summary+=" · последний: ${latest_name}"
+  [[ -n "$latest_date" ]] && summary+=" (${latest_date})"
+
+  echo
+  echo -e "${CYAN}  Сводка: ${summary}${RESET}"
+  return 0
 }
 
 # ── Режим: аргумент передан из CLI ───────────────────────────────────────────
@@ -150,7 +206,7 @@ if [[ $# -ge 1 ]]; then
     exit 4
   fi
 
-  run_backup_list "$WALG_CONFIG_FILE"
+  run_backup_list "$WALG_CONFIG_FILE" || exit 5
   exit 0
 fi
 
@@ -188,7 +244,7 @@ while true; do
   fi
 
   if (( CHOICE >= 1 && CHOICE <= TOTAL )); then
-    SELECTED_CFGS=( "${CFGS[(( CHOICE - 1 ))]}" )
+    SELECTED_CFGS=( "${CFGS[CHOICE-1]}" )
     break
   fi
 

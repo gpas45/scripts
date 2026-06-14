@@ -9,6 +9,18 @@ set -uo pipefail
 readonly WALG_DIR="/etc/wal-g.d"
 readonly WALG_BIN="/usr/bin/wal-g"
 
+# ── Цвета (только в интерактивный TTY и при отсутствии NO_COLOR) ────────────────
+if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
+  C_GREEN='\033[1;32m'
+  C_YELLOW='\033[0;33m'
+  C_RESET='\033[0m'
+else
+  C_GREEN='' C_YELLOW='' C_RESET=''
+fi
+
+# Кол-во FULL-бэкапов из последнего show_backups (для проверки retain в main).
+LAST_FULL_COUNT=0
+
 # ── Вспомогательные функции ────────────────────────────────────────────────────
 log()  { echo "[$(date '+%F %T')] INFO  $*"; }
 err()  { echo "[$(date '+%F %T')] ERROR $*" >&2; }
@@ -48,48 +60,46 @@ show_backups() {
   echo "  Список доступных бэкапов:"
   separator
 
-  local backup_list
-  backup_list="$("${WALG_BIN}" backup-list --pretty --config "${cfg}" 2>&1)"
-  local rc=$?
+  LAST_FULL_COUNT=0
+
+  # Запрашиваем список один раз; stderr отделяем, чтобы INFO-логи wal-g
+  # не попадали в таблицу, а при сбое — показать причину.
+  local out rc errfile
+  errfile="$(mktemp)"
+  out="$("${WALG_BIN}" backup-list --pretty --config "${cfg}" 2>"${errfile}")"
+  rc=$?
 
   if (( rc != 0 )); then
-    err "Не удалось получить список бэкапов"
-    echo "${backup_list}" >&2
+    err "Не удалось получить список бэкапов (rc=${rc})"
+    [[ -s "${errfile}" ]] && cat "${errfile}" >&2
+    rm -f "${errfile}"
     return 1
   fi
+  rm -f "${errfile}"
 
-  if [[ -z "${backup_list}" ]]; then
+  # Строки данных содержат 'base_'; delta-копии дополнительно — '_D_'.
+  local total delta full
+  total="$(printf '%s\n' "${out}" | grep -c 'base_')" || true
+  delta="$(printf '%s\n' "${out}" | grep -c '_D_')"  || true
+  full=$(( total - delta ))
+  LAST_FULL_COUNT=${full}
+
+  if (( total == 0 )); then
     echo "  (бэкапы не найдены)"
     separator
     echo
     return 0
   fi
 
-  echo "${backup_list}" | awk '
+  # Таблица: FULL — зелёным, delta (_D_) — жёлтым, заголовок без цвета.
+  printf '%s\n' "${out}" | awk -v g="${C_GREEN}" -v y="${C_YELLOW}" -v r="${C_RESET}" '
     NR==1 { print "  " $0; next }
-    /FULL/ { print "  \033[1;32m" $0 "\033[0m"; next }
-           { print "  \033[0;33m" $0 "\033[0m" }
+    /_D_/ { print "  " y $0 r; next }
+          { print "  " g $0 r }
   '
   separator
   echo
-
-  # Подсчёт FULL-бэкапов: всё что не содержит _D_ (исключая заголовок)
-  local full_count
-  full_count="$("${WALG_BIN}" backup-list --pretty --config "${cfg}" \
-    | grep -v "_D_" \
-    | grep -c "base_")"
-
-  echo "  Всего FULL-бэкапов: ${full_count}"
-  echo
-  
-  local full_backup_list
-  full_backup_list="$("${WALG_BIN}" backup-list --pretty --config "${cfg}" | grep -v "_D_")"
-  
-  echo "${full_backup_list}" | awk '
-    NR==1 { print "  " $0; next }
-    /FULL/ { print "  \033[1;32m" $0 "\033[0m"; next }
-           { print "  \033[0;33m" $0 "\033[0m" }
-  '
+  echo "  Итого:  FULL: ${full}  ·  delta: ${delta}  ·  всего: ${total}"
   echo
   return 0
 }
@@ -164,6 +174,12 @@ main() {
   # ── Показываем список бэкапов ────────────────────────────────────────────
   show_backups "${selected_cfg}" || exit 1
 
+  # ── Если FULL-бэкапов нет — удалять нечего ────────────────────────────────
+  if (( LAST_FULL_COUNT == 0 )); then
+    log "FULL-бэкапов нет — удалять нечего."
+    exit 0
+  fi
+
   # ── Запрашиваем количество FULL-копий для хранения ───────────────────────
   local retain
   while true; do
@@ -171,6 +187,11 @@ main() {
     [[ "${retain}" =~ ^[1-9][0-9]*$ ]] && break
     echo "  ✗ Введите целое число больше 0."
   done
+
+  if (( retain >= LAST_FULL_COUNT )); then
+    echo
+    echo "  ⚠ FULL-бэкапов всего ${LAST_FULL_COUNT}; при retain=${retain} удалять нечего."
+  fi
 
   # ── Итоговая сводка ──────────────────────────────────────────────────────
   echo

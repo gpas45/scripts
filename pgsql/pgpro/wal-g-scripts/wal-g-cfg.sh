@@ -4,8 +4,30 @@
 # Скрипт автоматически определяет кластера PostgreSQL и каталоги данных
 # Также автоматически добавляются необходимые параметры для архивации в postgresql.auto.conf
 # Для корректной работы скрипта должен быть настроен файл паролей .pgpass
+#
+# Запускать от root: требуется создание /etc/wal-g.d, chown postgres и systemctl restart.
+# Сокет PostgreSQL берётся из PGHOST_SOCKET (по умолчанию /tmp — конвенция PostgresPro 1C).
 
 set -Eeuo pipefail
+
+# Диагностика непредвиденных ошибок (флаг -E делает трап ERR наследуемым функциями).
+trap 'rc=$?; echo "ERROR: команда «${BASH_COMMAND}» завершилась с кодом ${rc} (строка ${LINENO})" >&2' ERR
+
+# =============================================================================
+# КОНСТАНТЫ
+# =============================================================================
+
+WALG_DIR='/etc/wal-g.d'
+WALG_COMPRESSION_METHOD='brotli'
+PGHOST_SOCKET='/tmp'          # каталог unix-сокета PostgreSQL
+PG_SUPERUSER='postgres'
+
+# Конфиги содержат секреты: umask 077 закрывает окно world-readable между
+# созданием файла и chmod 600 (install -d ниже задаёт режим каталога явно).
+umask 077
+
+# Кэш PGDATA: заполняется при обзоре кластеров, переиспользуется в шаге 7.
+declare -A CLUSTER_PGDATA=()
 
 # =============================================================================
 # ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
@@ -31,24 +53,32 @@ prompt_required() {
   echo "$var"
 }
 
-confirm_overwrite() {
-  local file="$1" ans
-  read -r -p "Файл ${file} уже существует. Перезаписать? [y/N]: " ans
-  [[ "$ans" == [Yy] ]]
+# Единый y/N-вопрос: принимает y, Y, yes, YES.
+ask_yes_no() {
+  local prompt="$1" ans
+  read -r -p "${prompt} [y/N]: " ans || return 1
+  [[ "$ans" =~ ^([yY]|[yY][eE][sS])$ ]]
 }
 
-write_cfg_json() {
-  # Генерирует JSON-конфиг с корректным экранированием значений.
-  # Аргументы: путь, далее пары «ключ значение».
-  local file="$1"; shift
-  python3 - "$file" "$@" <<'PY'
-import json, sys
-path, args = sys.argv[1], sys.argv[2:]
-obj = {args[i]: args[i + 1] for i in range(0, len(args), 2)}
-with open(path, "w", encoding="utf-8") as f:
-    json.dump(obj, f, indent=2, ensure_ascii=False)
-    f.write("\n")
-PY
+# Экранирование строки для безопасной вставки в JSON-значение.
+json_escape() {
+  local s="$1"
+  s="${s//\\/\\\\}"   # обратный слэш — первым
+  s="${s//\"/\\\"}"   # затем двойная кавычка
+  printf '%s' "$s"
+}
+
+# Жив ли кластер на порту (по unix-сокету).
+pg_alive() {
+  local port="$1" timeout="${2:-3}"
+  pg_isready -h "$PGHOST_SOCKET" -p "$port" -U "$PG_SUPERUSER" -t "$timeout" >/dev/null 2>&1
+}
+
+# SHOW <guc> с указанного кластера (пустая строка при ошибке).
+pg_show() {
+  local port="$1" guc="$2"
+  psql -h "$PGHOST_SOCKET" -p "$port" -U "$PG_SUPERUSER" -d postgres -At -q -X \
+    -c "SHOW ${guc};" 2>/dev/null
 }
 
 # =============================================================================
@@ -78,9 +108,7 @@ restart_pg_service() {
   echo
   echo "INFO: имя сервиса ${svc}"
 
-  local ans
-  read -r -p "Перезапустить сервис ${svc}? [y/N]: " ans
-  if [[ ! "$ans" =~ ^[yY]$ ]]; then
+  if ! ask_yes_no "Перезапустить сервис ${svc}?"; then
     echo "INFO: перезапуск отменён. Выполните вручную:"
     echo "      systemctl restart ${svc}"
     return 0
@@ -88,7 +116,7 @@ restart_pg_service() {
 
   echo "INFO: выполняется systemctl restart ${svc} ..."
 
-  if ! systemctl restart "$svc" 2>&1; then
+  if ! systemctl restart "$svc"; then
     echo "ERROR: не удалось перезапустить сервис ${svc}" >&2
     echo "INFO: проверьте статус: systemctl status ${svc}" >&2
     return 1
@@ -98,13 +126,13 @@ restart_pg_service() {
   local retries=10 i=1
   echo "INFO: ожидание готовности кластера на порту ${pgport}..."
   while (( i <= retries )); do
-    if pg_isready -h /tmp -p "$pgport" -U postgres -t 2 >/dev/null 2>&1; then
+    if pg_alive "$pgport" 2; then
       echo "OK: кластер ${pgport} запущен."
       return 0
     fi
     echo "  попытка ${i}/${retries}..."
     sleep 2
-    (( i++ )) || true
+    i=$(( i + 1 ))
   done
 
   echo "WARN: кластер ${pgport} не ответил после ${retries} попыток." >&2
@@ -118,7 +146,7 @@ restart_pg_service() {
 
 print_cluster_summary() {
   local -a ports=("$@")
-  local port pgdata cfg_path cfg_info avail_status backend_info idx=1
+  local port pgdata cfg_path cfg_info avail_status backend_info pgdata_info idx=1
 
   echo
   echo "=== Доступные кластеры ==="
@@ -128,10 +156,9 @@ print_cluster_summary() {
     cfg_path="${WALG_DIR}/.walg-${port}.json"
 
     # Доступность и PGDATA
-    if pg_isready -h /tmp -p "$port" -U postgres -t 3 >/dev/null 2>&1; then
+    if pg_alive "$port"; then
       avail_status="OK"
-      pgdata="$(psql -h /tmp -p "$port" -U postgres -d postgres \
-        -At -q -X -c "SHOW data_directory;" 2>/dev/null)" || pgdata=""
+      pgdata="$(pg_show "$port" data_directory)" || pgdata=""
       [[ -n "$pgdata" ]] && CLUSTER_PGDATA["$port"]="$pgdata"
     else
       avail_status="!!"
@@ -147,13 +174,12 @@ print_cluster_summary() {
       else
         backend_info="unknown"
       fi
-      cfg_info="конфиг есть (${backend_info})"
+      cfg_info="конфиг=есть (${backend_info})"
     else
-      cfg_info="конфиг отсутствует"
+      cfg_info="конфиг=отсутствует"
     fi
 
     # PGDATA
-    local pgdata_info
     if [[ -n "$pgdata" ]]; then
       pgdata_info="PGDATA=${pgdata}"
     else
@@ -163,7 +189,7 @@ print_cluster_summary() {
     printf "  %2d. [ %s ] Порт %-5s  |  %s, %s\n" \
       "$idx" "$avail_status" "$port" "$pgdata_info" "$cfg_info"
 
-    (( idx++ )) || true
+    idx=$(( idx + 1 ))
   done
 
   echo
@@ -229,7 +255,7 @@ configure_pg_instance() {
   local walgcfg="$3"
 
   local -a PSQL=(
-    psql -h /tmp -p "$pgport" -U postgres -d postgres
+    psql -h "$PGHOST_SOCKET" -p "$pgport" -U "$PG_SUPERUSER" -d postgres
     -At -q -X -v ON_ERROR_STOP=1
   )
 
@@ -280,11 +306,13 @@ configure_pg_instance() {
   }
 
   declare -A CUR=()
+  local k v
   while IFS='|' read -r k v; do
     [[ -n "$k" ]] && CUR["$k"]="$v"
   done <<< "$pg_out"
 
   local -a PARAMS=(wal_level archive_mode archive_command archive_timeout restore_command)
+  local p
   for p in "${PARAMS[@]}"; do
     if [[ -z "${CUR[$p]+x}" ]]; then
       echo "ERROR: параметр '${p}' не получен из pg_settings" >&2
@@ -304,6 +332,7 @@ configure_pg_instance() {
 
   if (( ${#TO_CHANGE[@]} == 0 )); then
     echo "INFO: параметры PostgreSQL ${pgport} уже соответствуют целевым."
+    PG_RESTART_NEEDED=0
     return 0
   fi
 
@@ -323,10 +352,9 @@ configure_pg_instance() {
   done
   echo
 
-  local ans
-  read -r -p "Применить ${#TO_CHANGE[@]} изменения для ${pgport}? [y/N]: " ans
-  if [[ ! "$ans" =~ ^[yY]$ ]]; then
+  if ! ask_yes_no "Применить ${#TO_CHANGE[@]} изменения для ${pgport}?"; then
     echo "INFO: изменения ${pgport} отменены пользователем."
+    PG_RESTART_NEEDED=0
     return 0
   fi
 
@@ -360,21 +388,6 @@ configure_pg_instance() {
 }
 
 # =============================================================================
-# КОНСТАНТЫ
-# =============================================================================
-
-WALG_DIR='/etc/wal-g.d'
-WALG_COMPRESSION_METHOD='brotli'
-
-# Кэш PGDATA: заполняется при обзоре кластеров, переиспользуется в шаге 7.
-declare -A CLUSTER_PGDATA=()
-
-if ! command -v python3 >/dev/null 2>&1; then
-  echo "ERROR: python3 не найден в PATH (требуется для генерации конфига)" >&2
-  exit 1
-fi
-
-# =============================================================================
 # ШАГ 1: ОБНАРУЖЕНИЕ И ВЫВОД СПИСКА КЛАСТЕРОВ
 # =============================================================================
 
@@ -383,7 +396,7 @@ if command -v ss >/dev/null 2>&1; then
   mapfile -t FOUND_PORTS < <(ss -tlnp 2>/dev/null \
     | grep postgres \
     | grep -oP ':\K\d+' \
-    | sort -u)
+    | sort -un)
 fi
 
 SELECTED_PORTS=()
@@ -391,7 +404,7 @@ if (( ${#FOUND_PORTS[@]} > 0 )); then
   print_cluster_summary "${FOUND_PORTS[@]}"
   select_ports_by_index FOUND_PORTS
 else
-  echo "WARN: кластеры не обнаружены автоматически." >&2
+  echo "WARN: кластеры не обнаружены автоматически (нужны права root для ss -p)." >&2
   MANUAL="$(prompt_required 'Укажите порты через пробел (например: 5432 5433)')"
   read -r -a SELECTED_PORTS <<< "$MANUAL"
 fi
@@ -457,9 +470,17 @@ if [[ "$BACKEND" == "s3" ]]; then
 
   [[ "$S3_BUCKET" != s3://* ]] && S3_BUCKET="s3://${S3_BUCKET}"
   S3_BUCKET="${S3_BUCKET%/}"
+
+  # Экранируем значения один раз для безопасной вставки в JSON
+  J_AWS_ENDPOINT="$(json_escape "$AWS_ENDPOINT")"
+  J_AWS_REGION="$(json_escape "$AWS_REGION")"
+  J_AWS_ACCESS_KEY_ID="$(json_escape "$AWS_ACCESS_KEY_ID")"
+  J_AWS_SECRET_ACCESS_KEY="$(json_escape "$AWS_SECRET_ACCESS_KEY")"
+  J_S3_BUCKET="$(json_escape "$S3_BUCKET")"
 else
   WALG_FILE_PREFIX_BASE="$(prompt_default 'Базовый каталог WALG_FILE_PREFIX' '/backup')"
   WALG_FILE_PREFIX_BASE="${WALG_FILE_PREFIX_BASE%/}"
+  J_WALG_FILE_PREFIX_BASE="$(json_escape "$WALG_FILE_PREFIX_BASE")"
 fi
 
 # =============================================================================
@@ -480,26 +501,26 @@ for PGPORT in "${SELECTED_PORTS[@]}"; do
   echo
   echo "━━━ Порт ${PGPORT} ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-  SVC_NAME="$(get_service_name "$PGVER" "$PGPORT")"
-  echo "INFO: сервис systemd: ${SVC_NAME}"
-
   if ! [[ "$PGPORT" =~ ^[0-9]+$ ]]; then
     echo "WARN: некорректный номер '${PGPORT}', пропуск" >&2
     continue
   fi
 
+  SVC_NAME="$(get_service_name "$PGVER" "$PGPORT")"
+  echo "INFO: сервис systemd: ${SVC_NAME}"
+
   CFG="${WALG_DIR}/.walg-${PGPORT}.json"
 
-  if ! pg_isready -h /tmp -p "$PGPORT" -U postgres -t 3 >/dev/null 2>&1; then
+  if ! pg_alive "$PGPORT"; then
     echo "WARN: кластер на порту ${PGPORT} недоступен, пропуск" >&2
     continue
   fi
 
+  # PGDATA берём из кэша обзора, иначе запрашиваем у кластера.
   if [[ -n "${CLUSTER_PGDATA[$PGPORT]+x}" ]]; then
     PGDATA="${CLUSTER_PGDATA[$PGPORT]}"
   else
-    PGDATA="$(psql -h /tmp -p "$PGPORT" -U postgres -d postgres -At -q -X \
-      -c "SHOW data_directory;" 2>/dev/null)" || true
+    PGDATA="$(pg_show "$PGPORT" data_directory)" || PGDATA=""
   fi
 
   if [[ -z "$PGDATA" || ! -d "$PGDATA" ]]; then
@@ -509,59 +530,69 @@ for PGPORT in "${SELECTED_PORTS[@]}"; do
 
   echo "INFO: PGDATA = ${PGDATA}"
 
+  # --- Решаем, нужно ли (пере)записывать конфиг ---
+  WRITE_CFG=1
   if [[ -f "$CFG" ]]; then
-    if ! confirm_overwrite "$CFG"; then
-      echo "INFO: конфиг ${CFG} оставлен без изменений."
-      PG_RESTART_NEEDED=0
-      configure_pg_instance "$PGPORT" "$PGDATA" "$CFG"
-      if (( PG_RESTART_NEEDED )); then
-        restart_pg_service "$PGVER" "$PGPORT"
+    if ask_yes_no "Файл ${CFG} уже существует. Перезаписать?"; then
+      if ! cp -p -- "$CFG" "${CFG}.bak"; then
+        echo "ERROR: не удалось создать резервную копию ${CFG}.bak, пропуск" >&2
+        continue
       fi
-      continue
+      echo "INFO: создана резервная копия ${CFG}.bak"
+    else
+      echo "INFO: конфиг ${CFG} оставлен без изменений."
+      WRITE_CFG=0
     fi
-    if ! cp -p -- "$CFG" "${CFG}.bak"; then
-      echo "ERROR: не удалось создать резервную копию ${CFG}.bak" >&2
-      continue
+  fi
+
+  # --- Запись конфига (umask 077 уже гарантирует режим 600 при создании) ---
+  if (( WRITE_CFG )); then
+    if [[ "$BACKEND" == "s3" ]]; then
+      cat > "$CFG" <<EOF
+{
+  "AWS_ENDPOINT":            "${J_AWS_ENDPOINT}",
+  "AWS_REGION":              "${J_AWS_REGION}",
+  "WALG_S3_PREFIX":          "${J_S3_BUCKET}/${PGPORT}",
+  "AWS_ACCESS_KEY_ID":       "${J_AWS_ACCESS_KEY_ID}",
+  "AWS_SECRET_ACCESS_KEY":   "${J_AWS_SECRET_ACCESS_KEY}",
+  "WALG_COMPRESSION_METHOD": "${WALG_COMPRESSION_METHOD}",
+  "WALG_DELTA_MAX_STEPS":    "${WALG_DELTA_MAX_STEPS}",
+  "PGPORT":                  "${PGPORT}",
+  "PGHOST":                  "${PGHOST_SOCKET}",
+  "PGDATA":                  "$(json_escape "$PGDATA")",
+  "PGSSLMODE":               "disable"
+}
+EOF
+    else
+      cat > "$CFG" <<EOF
+{
+  "WALG_FILE_PREFIX":        "${J_WALG_FILE_PREFIX_BASE}/${PGPORT}",
+  "WALG_COMPRESSION_METHOD": "${WALG_COMPRESSION_METHOD}",
+  "WALG_DELTA_MAX_STEPS":    "${WALG_DELTA_MAX_STEPS}",
+  "PGPORT":                  "${PGPORT}",
+  "PGHOST":                  "${PGHOST_SOCKET}",
+  "PGDATA":                  "$(json_escape "$PGDATA")",
+  "PGSSLMODE":               "disable"
+}
+EOF
     fi
-    echo "INFO: создана резервная копия ${CFG}.bak"
+
+    chmod 600 "$CFG"
+    if ! chown postgres:postgres "$CFG" 2>/dev/null; then
+      echo "WARN: не удалось установить владельца postgres для ${CFG}" >&2
+    fi
+    echo "OK: конфиг записан: ${CFG}"
   fi
 
-  if [[ "$BACKEND" == "s3" ]]; then
-    ( umask 077; write_cfg_json "$CFG" \
-      AWS_ENDPOINT            "$AWS_ENDPOINT" \
-      AWS_REGION              "$AWS_REGION" \
-      WALG_S3_PREFIX          "${S3_BUCKET}/${PGPORT}" \
-      AWS_ACCESS_KEY_ID       "$AWS_ACCESS_KEY_ID" \
-      AWS_SECRET_ACCESS_KEY   "$AWS_SECRET_ACCESS_KEY" \
-      WALG_COMPRESSION_METHOD "$WALG_COMPRESSION_METHOD" \
-      WALG_DELTA_MAX_STEPS    "$WALG_DELTA_MAX_STEPS" \
-      PGPORT                  "$PGPORT" \
-      PGHOST                  "/tmp" \
-      PGDATA                  "$PGDATA" \
-      PGSSLMODE               "disable" )
-  else
-    ( umask 077; write_cfg_json "$CFG" \
-      WALG_FILE_PREFIX        "${WALG_FILE_PREFIX_BASE}/${PGPORT}" \
-      WALG_COMPRESSION_METHOD "$WALG_COMPRESSION_METHOD" \
-      WALG_DELTA_MAX_STEPS    "$WALG_DELTA_MAX_STEPS" \
-      PGPORT                  "$PGPORT" \
-      PGHOST                  "/tmp" \
-      PGDATA                  "$PGDATA" \
-      PGSSLMODE               "disable" )
-  fi
-
-  chmod 600 "$CFG"
-  if ! chown postgres:postgres "$CFG" 2>/dev/null; then
-    echo "WARN: не удалось установить владельца postgres для ${CFG}" >&2
-  fi
-
-  echo "OK: конфиг записан: ${CFG}"
-
+  # --- Настройка параметров PostgreSQL (вызов защищён: сбой не прерывает цикл) ---
   PG_RESTART_NEEDED=0
-  configure_pg_instance "$PGPORT" "$PGDATA" "$CFG"
-
-  if (( PG_RESTART_NEEDED )); then
-    restart_pg_service "$PGVER" "$PGPORT"
+  if configure_pg_instance "$PGPORT" "$PGDATA" "$CFG"; then
+    if (( PG_RESTART_NEEDED )); then
+      restart_pg_service "$PGVER" "$PGPORT" \
+        || echo "WARN: перезапуск ${PGPORT} не выполнен, перехожу к следующему кластеру." >&2
+    fi
+  else
+    echo "WARN: настройка параметров PostgreSQL ${PGPORT} не завершена, пропуск." >&2
   fi
 
 done

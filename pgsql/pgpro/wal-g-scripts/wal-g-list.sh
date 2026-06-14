@@ -20,6 +20,32 @@ else
   RED='' GREEN='' YELLOW='' CYAN='' BOLD='' RESET=''
 fi
 
+# ── Постраничный вывод ───────────────────────────────────────────────────────
+# Прогоняем вывод через пейджер, только когда он не влезает на экран.
+#   less -R  — сохранить ANSI-цвета
+#        -F  — не запускать пейджер, если вывод помещается в один экран
+#        -X  — не очищать экран при выходе (вывод остаётся в истории терминала)
+# Пейджер задействуется лишь в интерактивном TTY; иначе (пайп/файл) — обычный cat,
+# чтобы не ломать скриптовое использование. Переопределяется через $PAGER.
+page_output() {
+  if [[ -t 1 ]]; then
+    if [[ -n "${PAGER:-}" ]]; then
+      eval "$PAGER"
+    elif command -v less >/dev/null 2>&1; then
+      less -RFX
+    else
+      cat
+    fi
+  else
+    cat
+  fi
+}
+
+# Временный файл для накопления вывода перед пейджером (чистим на выходе).
+TMPFILE=""
+cleanup() { [[ -n "$TMPFILE" ]] && rm -f "$TMPFILE"; }
+trap cleanup EXIT
+
 # ── Проверка зависимостей ────────────────────────────────────────────────────
 if [[ ! -x "$WALG_BIN" ]]; then
   echo "ERROR: wal-g not found or not executable: $WALG_BIN" >&2
@@ -179,19 +205,37 @@ run_backup_list() {
   return 0
 }
 
+# ── Обработка набора конфигов с постраничным выводом ─────────────────────────
+# Накапливаем stdout всех run_backup_list во временный файл и отдаём пейджеру,
+# который сам решает, нужна ли постраничность. Ошибки (stderr) идут напрямую в
+# терминал, не попадая в пейджер, чтобы сохранить потоковую семантику.
+# Возвращает 0 при успехе, 5 если хотя бы один конфиг завершился сбоем.
+run_selected() {
+  local errors=0 cfg
+  TMPFILE="$(mktemp "${TMPDIR:-/tmp}/walg-list.XXXXXX")" || {
+    echo "ERROR: не удалось создать временный файл" >&2
+    return 1
+  }
+
+  for cfg in "$@"; do
+    run_backup_list "$cfg" >>"$TMPFILE" || (( errors++ )) || true
+  done
+
+  page_output <"$TMPFILE"
+
+  if (( errors > 0 )); then
+    echo -e "${YELLOW}WARN: $errors config(s) failed${RESET}" >&2
+    return 5
+  fi
+  return 0
+}
+
 # ── Режим: аргумент передан из CLI ───────────────────────────────────────────
 if [[ $# -ge 1 ]]; then
   INPUT="$1"
 
   if [[ "${INPUT,,}" == "all" ]]; then
-    errors=0
-    for cfg in "${CFGS[@]}"; do
-      run_backup_list "$cfg" || (( errors++ )) || true
-    done
-    if (( errors > 0 )); then
-      echo -e "${YELLOW}WARN: $errors config(s) failed${RESET}" >&2
-      exit 5
-    fi
+    run_selected "${CFGS[@]}" || exit $?
     exit 0
   fi
 
@@ -206,7 +250,7 @@ if [[ $# -ge 1 ]]; then
     exit 4
   fi
 
-  run_backup_list "$WALG_CONFIG_FILE" || exit 5
+  run_selected "$WALG_CONFIG_FILE" || exit 5
   exit 0
 fi
 
@@ -261,14 +305,6 @@ if [[ "$FULL_ONLY" == "false" ]]; then
 fi
 
 # ── 4. Вывод бэкапов ─────────────────────────────────────────────────────────
-errors=0
-for cfg in "${SELECTED_CFGS[@]}"; do
-  run_backup_list "$cfg" || (( errors++ )) || true
-done
-
-if (( errors > 0 )); then
-  echo -e "${YELLOW}WARN: $errors config(s) failed${RESET}" >&2
-  exit 5
-fi
+run_selected "${SELECTED_CFGS[@]}" || exit 5
 
 exit 0

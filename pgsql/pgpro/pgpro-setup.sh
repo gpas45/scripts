@@ -32,16 +32,24 @@ die()    { echo -e "${RED}[ERROR]${RESET} $*" >&2; exit 1; }
 header() { echo -e "\n${BOLD}${CYAN}$*${RESET}"; }
 
 confirm() {
-    # confirm "Вопрос" → 0=да, 1=нет
+    # confirm "Вопрос" → 0=да, 1=нет. По умолчанию (Enter) — N (нет).
     local prompt="$1"
     while true; do
-        read -rp "$(echo -e "${YELLOW}${prompt}${RESET} [y/n]: ")" ans
+        read -rp "$(echo -e "${YELLOW}${prompt}${RESET} [y/N]: ")" ans
         case "${ans,,}" in
-            y|yes|д|да) return 0 ;;
-            n|no|н|нет) return 1 ;;
-            *)          echo "Введите y или n." ;;
+            y|yes|д|да)        return 0 ;;
+            n|no|н|нет|"")     return 1 ;;
+            *)                 echo "Введите y или n." ;;
         esac
     done
+}
+
+confirm_destroy() {
+    # Строгое подтверждение необратимого действия: нужно ввести yes/YES.
+    # Любой другой ввод (в т.ч. Enter) — отказ.
+    local prompt="$1" ans
+    read -rp "$(echo -e "${YELLOW}${prompt}${RESET}\nДля подтверждения введите ${BOLD}yes${RESET} (по умолчанию — НЕТ): ")" ans
+    [[ "$ans" == "yes" || "$ans" == "YES" ]]
 }
 
 # ───────────────────────────────────────────────
@@ -644,7 +652,7 @@ cmd_delete_instance() {
     systemctl reset-failed "${SVC}" 2>/dev/null || true
 
     if [[ -n "${PGDATA}" && -d "${PGDATA}" ]]; then
-        if confirm "Удалить каталог данных ${PGDATA}? Это НЕОБРАТИМО"; then
+        if confirm_destroy "Удалить каталог данных ${PGDATA}? Это НЕОБРАТИМО."; then
             rm -rf "${PGDATA}"
             log "Каталог данных удалён: ${PGDATA}"
         else

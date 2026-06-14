@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# wal-g-backup.sh — резервное копирование всех PostgreSQL-кластеров через WAL-G
+# wal-g-backup-all.sh — резервное копирование всех PostgreSQL-кластеров через WAL-G
+# (неинтерактивный режим для systemd-таймера; запускать от root)
 # ==============================================================================
 
 set -uo pipefail
@@ -9,7 +10,7 @@ set -uo pipefail
 readonly WALG_DIR="/etc/wal-g.d"
 readonly WALG_BIN="/usr/bin/wal-g"
 readonly PG_USER="postgres"
-readonly RETAIN=3          # сколько FULL-бэкапов хранить
+readonly RETAIN="${RETAIN:-3}"   # сколько FULL-бэкапов хранить (переопределяемо через env)
 
 # ── Глобальный счётчик ошибок ──────────────────────────────────────────────────
 errors=0
@@ -33,10 +34,11 @@ check_env() {
 # ── Извлечь PGDATA из JSON-конфига ────────────────────────────────────────────
 get_pgdata() {
   local cfg="$1"
-  python3 - <<PY
+  python3 - "$cfg" <<'PY'
 import json, sys
+cfg = sys.argv[1]
 try:
-    with open("${cfg}", encoding="utf-8") as f:
+    with open(cfg, encoding="utf-8") as f:
         val = json.load(f).get("PGDATA", "")
     print(val)
 except Exception as e:
@@ -94,7 +96,6 @@ LOGFILE="${logfile}"
 
 backup_rc=0
 delete_rc=0
-used_full=0
 
 {
   echo "===== \$(date '+%F %T') ===== START backup-push (delta) port=\${PORT} ====="
@@ -108,7 +109,6 @@ used_full=0
   if (( backup_rc != 0 )); then
     echo "===== \$(date '+%F %T') ===== WARN delta rc=\${backup_rc}, запускаем FULL ====="
     backup_rc=0
-    used_full=1
 
     echo "===== \$(date '+%F %T') ===== START backup-push --full port=\${PORT} ====="
 

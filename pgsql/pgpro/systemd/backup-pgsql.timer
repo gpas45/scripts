@@ -1,5 +1,5 @@
 [Unit]
-Description=Backup and maintenance PosrgeSQL DB
+Description=Backup and maintenance PostgreSQL DB
 
 [Timer]
 OnCalendar=*-*-* 01:15:00

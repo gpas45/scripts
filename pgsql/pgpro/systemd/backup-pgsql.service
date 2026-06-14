@@ -1,12 +1,12 @@
 [Unit]
-Description=Backup and maintenance PosrgeSQL DB
+Description=Backup and maintenance PostgreSQL DB
 Requires=postgrespro-1c-16.service
 After=postgrespro-1c-16.service
 
 [Service]
 Type=oneshot
-ExecStart=/var/lib/pgpro/_backup/scripts/backup-db-pgsql.sh
-User=postgres
+# Запуск от root: скрипт сам переключается на postgres через su - postgres.
+ExecStart=/var/lib/pgpro/_backup/scripts/wal-g-backup-all.sh
 Environment="PATH=/sbin:/bin:/usr/sbin:/usr/bin"
 
 [Install]

@@ -39,8 +39,7 @@ if command -v ss >/dev/null 2>&1; then
   mapfile -t FOUND_PORTS < <(
     ss -tlnp 2>/dev/null \
       | grep -i postgres \
-      | grep -oP ':\d+' \
-      | grep -oP '\d+' \
+      | grep -oP ':\K\d+' \
       | sort -u
   )
 fi
@@ -61,13 +60,13 @@ check_port() {
     return 1
   fi
 
-  if ! pg_isready -p "$port" -U postgres -t 3 >/dev/null 2>&1; then
+  if ! pg_isready -h /tmp -p "$port" -U postgres -t 3 >/dev/null 2>&1; then
     echo "  [SKIP] Порт ${port}: кластер недоступен"
     return 1
   fi
 
   local pgdata
-  pgdata="$(psql -p "$port" -U postgres -d postgres -At \
+  pgdata="$(psql -h /tmp -p "$port" -U postgres -d postgres -At \
               -c "show data_directory;" 2>/dev/null || true)"
 
   if [[ -z "$pgdata" || ! -d "$pgdata" ]]; then
@@ -208,7 +207,7 @@ for PGPORT in "${SELECTED_PORTS[@]}"; do
     # ── Delta → при ошибке FULL ──
     echo "    Попытка delta-бэкапа..."
     if ! su - postgres -c \
-         "/usr/bin/wal-g backup-push --config '${WALG_CONFIG_FILE}' '${PGDATA}'" 2>&1; then
+         "/usr/bin/wal-g backup-push --config '${WALG_CONFIG_FILE}' '${PGDATA}'"; then
       echo "    Delta не удалась — пробуем FULL бэкап..." >&2
       if su - postgres -c \
            "/usr/bin/wal-g backup-push --full --config '${WALG_CONFIG_FILE}' '${PGDATA}'"; then

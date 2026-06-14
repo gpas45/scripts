@@ -113,6 +113,18 @@ if [[ "${CONFIRM_DATA,,}" == "n" ]]; then
     log_info "Используется путь: ${BOLD}$RESTORE_PGDATA${NC}"
 fi
 
+# Версия PostgreSQL нужна для имени systemd-юнита. Неверная версия → проверка
+# is-active бьёт по чужому юниту и может не заметить ЗАПУЩЕННЫЙ кластер, что
+# приведёт к перезаписи живого PGDATA. Пытаемся вывести версию из пути
+# (.../pgpro/<ver>/...), иначе берём env/умолчание, и подтверждаем у оператора.
+PGVER_DEFAULT="$PGVER"
+if [[ "$RESTORE_PGDATA" =~ /pgpro/([^/]+)/ ]]; then
+    PGVER_DEFAULT="${BASH_REMATCH[1]}"
+fi
+read -rp "Версия PostgreSQL (PGVER) [${PGVER_DEFAULT}]: " PGVER_INPUT
+PGVER="${PGVER_INPUT:-$PGVER_DEFAULT}"
+log_info "PGVER: ${BOLD}$PGVER${NC}  →  юнит: ${BOLD}$(get_service_name "$PGVER" "$PGPORT")${NC}"
+
 # =============================================================================
 # Шаг 3: Выбор точки восстановления
 # =============================================================================

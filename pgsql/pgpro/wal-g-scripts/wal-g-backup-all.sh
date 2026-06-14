@@ -50,7 +50,7 @@ PY
 # ── Извлечь PORT из JSON-конфига ──────────────────────────────────────────────
 get_port() {
   local cfg="$1"
-  python3 - "$cfg" <<PY
+  python3 - "$cfg" <<'PY'
 import json, sys
 cfg = sys.argv[1]
 try:

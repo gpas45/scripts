@@ -1,7 +1,7 @@
 [Unit]
 Description=Backup and maintenance PostgreSQL DB
-Requires=postgrespro-1c-16.service
-After=postgrespro-1c-16.service
+Wants=postgrespro-1c-18.service
+After=postgrespro-1c-18.service
 
 [Service]
 Type=oneshot

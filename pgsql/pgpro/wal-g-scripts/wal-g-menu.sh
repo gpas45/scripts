@@ -92,6 +92,11 @@ print_menu() {
       "$k" "$mark" "${MENU_LABEL[$k]}" "${MENU_DESC[$k]}"
   done
   echo
+  local imark
+  [[ -f "$INSTALLER" ]] && imark="${GREEN}●${NC}" || imark="${RED}✗${NC}"
+  printf "  ${BOLD}7.${NC} %b %-24s — %s\n" "$imark" "Задание systemd" "просмотр/включение/удаление таймера бэкапа"
+  printf "  ${BOLD}8.${NC} %b %-24s — %s\n" "$imark" "Установка набора"   "развернуть скрипты и юниты (wal-g-install.sh)"
+  echo
   echo -e "  ${BOLD}0.${NC} Выход"
   echo
 }
@@ -127,15 +132,113 @@ pause() {
   echo
 }
 
+# ── Вызов инсталлятора (общий источник логики systemd-юнитов) ────────────────
+INSTALLER="${SCRIPT_DIR}/wal-g-install.sh"
+
+run_installer() {
+  if [[ ! -f "$INSTALLER" ]]; then
+    log_error "Инсталлятор не найден: ${INSTALLER}"
+    return 1
+  fi
+  bash "$INSTALLER" "$@"
+}
+
+# ── Статус systemd-задания ───────────────────────────────────────────────────
+UNIT_TIMER="backup-pgsql.timer"
+UNIT_SERVICE="backup-pgsql.service"
+SYSTEMD_DIR="/etc/systemd/system"
+
+systemd_status() {
+  log_section "Статус задания резервного копирования"
+
+  if ! command -v systemctl >/dev/null 2>&1; then
+    log_warn "systemctl недоступен в этой системе."
+    return 0
+  fi
+
+  local svc_file="${SYSTEMD_DIR}/${UNIT_SERVICE}"
+  local tmr_file="${SYSTEMD_DIR}/${UNIT_TIMER}"
+
+  if [[ -f "$tmr_file" || -f "$svc_file" ]]; then
+    log_info "Файлы юнитов: $( [[ -f "$svc_file" ]] && echo "${UNIT_SERVICE} ✓" || echo "${UNIT_SERVICE} ✗" ), $( [[ -f "$tmr_file" ]] && echo "${UNIT_TIMER} ✓" || echo "${UNIT_TIMER} ✗" )"
+  else
+    log_warn "Юниты не установлены (нет файлов в ${SYSTEMD_DIR})."
+    return 0
+  fi
+
+  echo -e "  enabled : ${BOLD}$(systemctl is-enabled "${UNIT_TIMER}" 2>/dev/null || echo '—')${NC}"
+  echo -e "  active  : ${BOLD}$(systemctl is-active  "${UNIT_TIMER}" 2>/dev/null || echo '—')${NC}"
+  echo
+  systemctl list-timers --all "${UNIT_TIMER}" --no-pager 2>/dev/null || true
+}
+
+# ── Подменю: управление systemd-заданием ─────────────────────────────────────
+systemd_submenu() {
+  while true; do
+    echo
+    echo -e "${BOLD}--- Задание systemd (резервное копирование) ---${NC}"
+    echo -e "  ${BOLD}1.${NC} Показать статус"
+    echo -e "  ${BOLD}2.${NC} Установить/обновить юниты и включить"
+    echo -e "  ${BOLD}3.${NC} Отключить (disable --now)"
+    echo -e "  ${BOLD}4.${NC} Удалить юниты"
+    echo -e "  ${BOLD}0.${NC} Назад"
+    echo
+    local c
+    read -rp "Выберите пункт [0-4]: " c || { echo; return 0; }
+
+    case "$c" in
+      1) systemd_status; pause ;;
+      2)
+        run_installer units || true
+        if command -v systemctl >/dev/null 2>&1; then
+          if systemctl enable --now "${UNIT_TIMER}"; then
+            log_info "Таймер ${UNIT_TIMER} включён."
+          else
+            log_warn "Не удалось включить таймер ${UNIT_TIMER}."
+          fi
+        fi
+        pause
+        ;;
+      3)
+        if command -v systemctl >/dev/null 2>&1; then
+          systemctl disable --now "${UNIT_TIMER}" && log_info "Таймер отключён." \
+            || log_warn "Не удалось отключить таймер."
+        else
+          log_warn "systemctl недоступен."
+        fi
+        pause
+        ;;
+      4)
+        read -rp "Удалить юниты ${UNIT_TIMER}/${UNIT_SERVICE}? [y/N]: " yn
+        if [[ "${yn,,}" == "y" ]]; then
+          run_installer uninstall-units || true
+        else
+          log_info "Отменено."
+        fi
+        pause
+        ;;
+      0|q|Q) return 0 ;;
+      *) log_warn "Некорректный ввод: '${c}'." ;;
+    esac
+  done
+}
+
 # ── Главный цикл ─────────────────────────────────────────────────────────────
 while true; do
   print_menu
-  read -rp "Выберите пункт [0-${MENU_KEYS[-1]}]: " CHOICE || { echo; exit 0; }
+  read -rp "Выберите пункт [0-8]: " CHOICE || { echo; exit 0; }
 
   case "$CHOICE" in
     0|q|Q|exit)
       echo "Выход."
       exit 0
+      ;;
+    7)
+      systemd_submenu
+      ;;
+    8)
+      run_installer install || true
+      pause
       ;;
     [1-9]*)
       if [[ -n "${MENU_SCRIPT[$CHOICE]:-}" ]]; then

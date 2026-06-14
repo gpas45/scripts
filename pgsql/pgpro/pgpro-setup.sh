@@ -9,6 +9,7 @@
 #   sudo ./pgpro-setup.sh                 ← интерактивное меню
 #   sudo ./pgpro-setup.sh install         ← установка (спросит версию)
 #   sudo ./pgpro-setup.sh add-instance    ← добавить экземпляр
+#   sudo ./pgpro-setup.sh delete-instance ← удалить экземпляр
 #   sudo ./pgpro-setup.sh list            ← список экземпляров
 #
 # Переменные окружения (можно переопределить):
@@ -143,45 +144,51 @@ detect_installed_version() {
 # ───────────────────────────────────────────────
 # СПИСОК ЭКЗЕМПЛЯРОВ
 # ───────────────────────────────────────────────
+# Единая таблица по всем установленным версиям Postgres Pro.
 list_instances() {
-    local ver="${1}"
-    header "═══ Экземпляры Postgres Pro-${ver} ═══"
+    header "═══ Экземпляры Postgres Pro ═══"
 
-    local files=()
-    mapfile -t files < <(
-        find /etc/default -maxdepth 1 -name "postgrespro-${ver}*" \
-            ! -name "*.dpkg*" ! -name "*.bak" 2>/dev/null | sort
-    )
-    if [[ ${#files[@]} -eq 0 ]]; then
-        warn "Файлы окружения не найдены в /etc/default — экземпляров нет."
+    local vers=()
+    mapfile -t vers < <(find /opt/pgpro -maxdepth 1 -mindepth 1 -type d -printf '%f\n' 2>/dev/null | sort)
+    if [[ ${#vers[@]} -eq 0 ]]; then
+        warn "Установок Postgres Pro не найдено (/opt/pgpro пуст)."
         return
     fi
 
-    printf "${BOLD}%-22s  %-6s  %-40s  %-9s${RESET}\n" "СЕРВИС" "ПОРТ" "PGDATA" "СТАТУС"
-    printf '%s\n' "$(printf '─%.0s' {1..82})"
+    printf "${BOLD}%-8s  %-24s  %-6s  %-34s  %-9s${RESET}\n" \
+        "ВЕРСИЯ" "СЕРВИС" "ПОРТ" "PGDATA" "СТАТУС"
+    printf '%s\n' "$(printf '─%.0s' {1..92})"
 
-    local f base pgdata pgport svc status
-    for f in "${files[@]}"; do
-        pgdata=$(grep -E "^PGDATA=" "$f" 2>/dev/null | head -1 | sed "s/^PGDATA=//;s/['\"]//g")
-        base=$(basename "$f")
-        if [[ "$base" =~ -([0-9]{4,5})$ ]]; then
-            pgport="${BASH_REMATCH[1]}"
-            svc="postgrespro-${ver}@${pgport}"
-        else
-            pgport="5432"
-            svc="postgrespro-${ver}"
-        fi
-        if systemctl is-active --quiet "${svc}" 2>/dev/null; then
-            status="${GREEN}running${RESET}"
-        elif systemctl is-enabled --quiet "${svc}" 2>/dev/null; then
-            status="${YELLOW}stopped${RESET}"
-        else
-            status="${RED}unknown${RESET}"
-        fi
-        printf "%-22s  %-6s  %-40s  %b\n" "${svc}" "${pgport}" "${pgdata:-—}" "${status}"
+    local total=0 ver f base port svc pgdata status
+    for ver in "${vers[@]}"; do
+        local files=()
+        mapfile -t files < <(
+            find /etc/default -maxdepth 1 \
+                \( -name "postgrespro-${ver}" -o -name "postgrespro-${ver}-*" \) \
+                ! -name "*.dpkg*" ! -name "*.bak" 2>/dev/null | sort
+        )
+        for f in "${files[@]}"; do
+            base=$(basename "$f")
+            if [[ "$base" == "postgrespro-${ver}" ]]; then
+                port="5432"; svc="postgrespro-${ver}"
+            else
+                port="${base##postgrespro-"${ver}"-}"; svc="postgrespro-${ver}@${port}"
+            fi
+            pgdata=$(grep -E "^PGDATA=" "$f" 2>/dev/null | head -1 | sed "s/^PGDATA=//;s/['\"]//g")
+            if systemctl is-active --quiet "${svc}" 2>/dev/null; then
+                status="${GREEN}running${RESET}"
+            elif systemctl is-enabled --quiet "${svc}" 2>/dev/null; then
+                status="${YELLOW}stopped${RESET}"
+            else
+                status="${RED}unknown${RESET}"
+            fi
+            printf "%-8s  %-24s  %-6s  %-34s  %b\n" \
+                "${ver}" "${svc}" "${port}" "${pgdata:-—}" "${status}"
+            (( total++ )) || true
+        done
     done
-    printf '%s\n' "$(printf '─%.0s' {1..82})"
-    echo ""
+    printf '%s\n' "$(printf '─%.0s' {1..92})"
+    echo -e "Итого: ${BOLD}${total}${RESET} экземпляр(ов)\n"
 }
 
 # ───────────────────────────────────────────────
@@ -258,7 +265,7 @@ cmd_install() {
     # Предупреждение, если уже установлено
     if [[ -x "${PG_BIN}/postgres" ]]; then
         warn "Postgres Pro ${PGVER} уже установлен (${PG_BIN})."
-        confirm "Продолжить всё равно?" || { log "Отменено."; exit 0; }
+        confirm "Продолжить всё равно?" || { log "Отменено."; return 0; }
     fi
 
     # Доп. шаги (по умолчанию включены, как было выбрано)
@@ -375,7 +382,7 @@ cmd_add_instance() {
     PG_BIN="$(pg_bin "${PGVER}")"
     [[ -x "${PG_BIN}/initdb" ]] || die "initdb не найден: ${PG_BIN}/initdb (версия установлена?)"
 
-    list_instances "${PGVER}"
+    list_instances
 
     # Порт
     while true; do
@@ -427,7 +434,7 @@ cmd_add_instance() {
     printf "  %-12s %s\n" "Порт:"   "${PGPORT}"
     printf "  %-12s %s\n" "PGDATA:" "${PGDATA_NEW}"
     echo ""
-    confirm "Создать экземпляр?" || { log "Отменено."; exit 0; }
+    confirm "Создать экземпляр?" || { log "Отменено."; return 0; }
 
     # ── Шаг 1: шаблон unit ──
     header "Шаг 1: шаблонный unit ${SVC_TEMPLATE}"
@@ -488,7 +495,7 @@ EOF
     fi
 
     header "✅ Экземпляр на порту ${PGPORT} создан"
-    list_instances "${PGVER}"
+    list_instances
 }
 
 # ───────────────────────────────────────────────
@@ -496,38 +503,136 @@ EOF
 # ───────────────────────────────────────────────
 cmd_list() {
     require_root
-    detect_installed_version
-    list_instances "${PGVER}"
+    list_instances
+}
+
+# ───────────────────────────────────────────────
+# КОМАНДА: УДАЛИТЬ ЭКЗЕМПЛЯР
+# ───────────────────────────────────────────────
+cmd_delete_instance() {
+    require_root
+
+    # Собираем все дополнительные экземпляры (с портом) по всем версиям
+    local vers=() entries=() ver f base port
+    mapfile -t vers < <(find /opt/pgpro -maxdepth 1 -mindepth 1 -type d -printf '%f\n' 2>/dev/null | sort)
+    for ver in "${vers[@]}"; do
+        local files=()
+        mapfile -t files < <(
+            find /etc/default -maxdepth 1 -name "postgrespro-${ver}-*" \
+                ! -name "*.dpkg*" ! -name "*.bak" 2>/dev/null | sort
+        )
+        for f in "${files[@]}"; do
+            base=$(basename "$f")
+            port="${base##postgrespro-"${ver}"-}"
+            [[ "$port" =~ ^[0-9]{4,5}$ ]] || continue
+            entries+=("${ver}|${port}")
+        done
+    done
+
+    list_instances
+
+    if [[ ${#entries[@]} -eq 0 ]]; then
+        warn "Дополнительных экземпляров нет. Базовый кластер (порт 5432) удаляется через apt."
+        return
+    fi
+
+    header "Выберите экземпляр для удаления:"
+    local i=1 e
+    for e in "${entries[@]}"; do
+        printf "  ${BOLD}%2d${RESET}) postgrespro-%s@%s\n" "$i" "${e%%|*}" "${e##*|}"
+        (( i++ )) || true
+    done
+    printf "  ${BOLD}%2d${RESET}) отмена\n" "$i"
+
+    local choice
+    read -rp "$(echo -e "${CYAN}Экземпляр${RESET}: ")" choice
+    if ! [[ "$choice" =~ ^[0-9]+$ ]] || (( choice < 1 || choice > ${#entries[@]} )); then
+        log "Отменено."; return
+    fi
+
+    local sel="${entries[choice-1]}"
+    local del_ver="${sel%%|*}"
+    local PGPORT="${sel##*|}"
+    local SVC="postgrespro-${del_ver}@${PGPORT}"
+    local ENV_FILE="/etc/default/postgrespro-${del_ver}-${PGPORT}"
+    local OVERRIDE_DIR="/etc/systemd/system/${SVC}.service.d"
+    local PGDATA
+    PGDATA=$(grep -E "^PGDATA=" "$ENV_FILE" 2>/dev/null | head -1 | sed "s/^PGDATA=//;s/['\"]//g")
+
+    echo ""
+    warn "Будет удалён экземпляр ${SVC} (порт ${PGPORT})."
+    printf "  PGDATA: %s\n" "${PGDATA:-—}"
+    confirm "Остановить экземпляр и удалить его конфигурацию?" || { log "Отменено."; return; }
+
+    log "Остановка и отключение ${SVC}"
+    systemctl stop "${SVC}" 2>/dev/null || true
+    systemctl disable "${SVC}" 2>/dev/null || true
+
+    log "Удаление override и файла окружения"
+    rm -rf "${OVERRIDE_DIR}"
+    rm -f "${ENV_FILE}"
+    systemctl daemon-reload
+    systemctl reset-failed "${SVC}" 2>/dev/null || true
+
+    if [[ -n "${PGDATA}" && -d "${PGDATA}" ]]; then
+        if confirm "Удалить каталог данных ${PGDATA}? Это НЕОБРАТИМО"; then
+            rm -rf "${PGDATA}"
+            log "Каталог данных удалён: ${PGDATA}"
+        else
+            warn "Каталог данных оставлен: ${PGDATA}"
+        fi
+    fi
+
+    header "✅ Экземпляр ${SVC} удалён"
+    list_instances
 }
 
 # ───────────────────────────────────────────────
 # МЕНЮ
 # ───────────────────────────────────────────────
-main_menu() {
-    header "═══ Postgres Pro: установка и экземпляры ═══"
-    echo "  1) Установить Postgres Pro (выбор версии)"
-    echo "  2) Добавить экземпляр (instance)"
-    echo "  3) Показать экземпляры"
+# Показ экземпляров с возвратом в меню или выходом (скрипт сам не закрывается).
+menu_list() {
+    list_instances
+    echo "  1) Назад в меню"
     echo "  0) Выход"
-    local choice
-    read -rp "$(echo -e "${CYAN}Действие${RESET} [1]: ")" choice
-    case "${choice:-1}" in
-        1) cmd_install ;;
-        2) cmd_add_instance ;;
-        3) cmd_list ;;
+    local c
+    read -rp "$(echo -e "${CYAN}Действие${RESET} [1]: ")" c
+    case "${c:-1}" in
         0) exit 0 ;;
-        *) die "Неизвестный пункт меню: ${choice}" ;;
+        *) return 0 ;;
     esac
+}
+
+main_menu() {
+    while true; do
+        header "═══ Postgres Pro: установка и экземпляры ═══"
+        echo "  1) Установить Postgres Pro (выбор версии)"
+        echo "  2) Добавить экземпляр (instance)"
+        echo "  3) Показать экземпляры"
+        echo "  4) Удалить экземпляр (instance)"
+        echo "  0) Выход"
+        local choice
+        read -rp "$(echo -e "${CYAN}Действие${RESET} [1]: ")" choice
+        case "${choice:-1}" in
+            1) cmd_install ;;
+            2) cmd_add_instance ;;
+            3) menu_list ;;
+            4) cmd_delete_instance ;;
+            0) exit 0 ;;
+            *) warn "Неизвестный пункт меню: ${choice}" ;;
+        esac
+    done
 }
 
 # ───────────────────────────────────────────────
 # ТОЧКА ВХОДА
 # ───────────────────────────────────────────────
 case "${1:-menu}" in
-    install)             cmd_install ;;
-    add-instance|add)    cmd_add_instance ;;
-    list|ls)             cmd_list ;;
-    menu|"")             require_root; main_menu ;;
+    install)                   cmd_install ;;
+    add-instance|add)          cmd_add_instance ;;
+    delete-instance|del|rm)    cmd_delete_instance ;;
+    list|ls)                   cmd_list ;;
+    menu|"")                   require_root; main_menu ;;
     -h|--help|help)
         grep -E '^#( |$)' "$0" | sed -E 's/^# ?//'
         ;;

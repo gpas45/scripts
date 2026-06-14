@@ -9,7 +9,7 @@
 
 | Файл | Назначение |
 |---|---|
-| `pgpro-setup.sh` | Установка Postgres Pro **с выбором версии** + добавление экземпляров — по статье [wiki.dioservice.ru](https://wiki.dioservice.ru/ru/linux/postgreSQL/postgresql-linux). Меню/подкоманды `install` / `add-instance` / `list`. Установка: подготовка ОС (локали, TZ, консоль), репозиторий `repo.postgrespro.ru`, `apt-mark hold`, `pg-setup initdb --tune=1c`, контрольные суммы для PG<17, `pg_hba` scram-sha-256, пароль postgres, отключение IPv6. Запуск от root. |
+| `pgpro-setup.sh` | Установка Postgres Pro **с выбором версии**, добавление и удаление экземпляров — по статье [wiki.dioservice.ru](https://wiki.dioservice.ru/ru/linux/postgreSQL/postgresql-linux). Циклическое меню (сам не выходит) и подкоманды `install` / `add-instance` / `delete-instance` / `list`. Установка: подготовка ОС (локали, TZ, консоль), репозиторий `repo.postgrespro.ru`, `apt-mark hold`, `pg-setup initdb --tune=1c`, контрольные суммы для PG<17, `pg_hba` scram-sha-256, пароль postgres, отключение IPv6. `list` — единая таблица экземпляров по всем версиям. Запуск от root. |
 | `pg_add_cluster.sh` | Добавление нового кластера Postgres Pro на хост (initdb, регистрация, настройка). |
 | `maintenance.sh` | Регламентное обслуживание БД. |
 | `wal-g-scripts/` | Обвязка [WAL-G](https://github.com/wal-g/wal-g): конфиг, полный/инкрементальный бэкап, список, restore, удаление. |

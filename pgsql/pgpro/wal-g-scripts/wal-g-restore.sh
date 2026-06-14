@@ -174,11 +174,33 @@ while true; do
 done
 
 # =============================================================================
-# Шаг 4: Проверка сервиса и директории
+# Шаг 4: Итоговое подтверждение (ДО любых необратимых действий)
 # =============================================================================
-log_section "Предварительные проверки"
-
 SERVICE_NAME="$(get_service_name "$PGVER" "$PGPORT")"
+
+log_section "Итоговые параметры"
+
+echo -e "  Порт:           ${BOLD}$PGPORT${NC}"
+echo -e "  PGDATA:         ${BOLD}$RESTORE_PGDATA${NC}"
+echo -e "  Сервис:         ${BOLD}$SERVICE_NAME${NC}"
+echo -e "  Конфиг WAL-G:   ${BOLD}$WALG_CONFIG_FILE${NC}"
+echo -e "  Бэкап:          ${BOLD}$BACKUP_NAME${NC}"
+[[ -n "${PITR_TARGET:-}" ]] && \
+echo -e "  PITR до:        ${BOLD}$PITR_TARGET${NC}"
+echo ""
+log_warn "Будет остановлен сервис (если запущен) и ЗАМЕНЕНЫ все данные в $RESTORE_PGDATA!"
+echo ""
+
+read -rp "Введите YES для подтверждения: " FINAL_CONFIRM
+if [[ "$FINAL_CONFIRM" != "YES" ]]; then
+    log_warn "Отменено пользователем."
+    exit 0
+fi
+
+# =============================================================================
+# Шаг 5: Остановка сервиса и подготовка каталога
+# =============================================================================
+log_section "Подготовка"
 
 if systemctl is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
     log_warn "Сервис ${BOLD}$SERVICE_NAME${NC} запущен!"
@@ -204,8 +226,18 @@ if [[ -d "$RESTORE_PGDATA" ]]; then
         mv "$RESTORE_PGDATA" "$BACKUP_OLD"
         log_info "Готово: $BACKUP_OLD"
     else
-        log_warn "Очищаю $RESTORE_PGDATA ..."
-        rm -rf "$RESTORE_PGDATA"
+        # Удаление без резервной копии — единственный безвозвратный шаг:
+        # требуем отдельное явное подтверждение, иначе откатываемся к mv.
+        log_warn "БЕЗВОЗВРАТНОЕ удаление ${BOLD}$RESTORE_PGDATA${NC} без резервной копии!"
+        read -rp "Введите YES для удаления без резервной копии: " WIPE_CONFIRM
+        if [[ "$WIPE_CONFIRM" == "YES" ]]; then
+            log_warn "Удаляю $RESTORE_PGDATA ..."
+            rm -rf "$RESTORE_PGDATA"
+        else
+            log_info "Не подтверждено — сохраняю текущий PGDATA в $BACKUP_OLD."
+            mv "$RESTORE_PGDATA" "$BACKUP_OLD"
+            log_info "Готово: $BACKUP_OLD"
+        fi
     fi
 fi
 
@@ -213,27 +245,6 @@ mkdir -p "$RESTORE_PGDATA"
 chown postgres:postgres "$RESTORE_PGDATA"
 chmod 700 "$RESTORE_PGDATA"
 log_info "Директория подготовлена: $RESTORE_PGDATA"
-
-# =============================================================================
-# Шаг 5: Итоговое подтверждение
-# =============================================================================
-log_section "Итоговые параметры"
-
-echo -e "  Порт:           ${BOLD}$PGPORT${NC}"
-echo -e "  PGDATA:         ${BOLD}$RESTORE_PGDATA${NC}"
-echo -e "  Конфиг WAL-G:   ${BOLD}$WALG_CONFIG_FILE${NC}"
-echo -e "  Бэкап:          ${BOLD}$BACKUP_NAME${NC}"
-[[ -n "${PITR_TARGET:-}" ]] && \
-echo -e "  PITR до:        ${BOLD}$PITR_TARGET${NC}"
-echo ""
-log_warn "Все данные в $RESTORE_PGDATA будут ЗАМЕНЕНЫ!"
-echo ""
-
-read -rp "Введите YES для подтверждения: " FINAL_CONFIRM
-if [[ "$FINAL_CONFIRM" != "YES" ]]; then
-    log_warn "Отменено пользователем."
-    exit 0
-fi
 
 # =============================================================================
 # Шаг 6: Восстановление

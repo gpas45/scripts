@@ -16,6 +16,7 @@
 | [`proxmox/`](proxmox/) | Скрипты для Proxmox VE. |
 | [`linux/`](linux/) | Linux: тесты железа, конфиги окружения, 1С, motd. |
 | [`zabbix/`](zabbix/) | Шаблоны мониторинга Zabbix. |
+| [`obsidian/`](obsidian/) | Шаблоны Obsidian (Templater), напр. торговый дневник. |
 
 ## CI
 

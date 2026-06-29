@@ -88,13 +88,22 @@ ui_msg() { # ui_msg "текст"
 }
 
 # Прокручиваемый просмотр длинного текста (список экземпляров и т.п.).
-# msgbox обрезает длинный вывод без скролла — здесь используем --textbox --scrolltext.
+# msgbox обрезает длинный вывод без скролла — здесь --textbox --scrolltext (полоса
+# прокрутки справа). Высоту подгоняем под терминал, а в заголовок выносим подсказку,
+# чтобы было видно, что список листается.
 ui_textbox() { # ui_textbox "заголовок" "текст"
     local title=$1 text=$2
     if [[ -n "$DIALOG" ]]; then
         local tmp; tmp=$(mktemp) || { ui_msg "$text"; return; }
         printf '%b\n' "$text" > "$tmp"
-        "$DIALOG" --title "$title" --scrolltext --textbox "$tmp" 22 78 1>&2
+        # размер окна под терминал (с разумными границами)
+        local rows cols h w
+        rows=$(tput lines 2>/dev/null || echo 24); cols=$(tput cols 2>/dev/null || echo 80)
+        [[ "$rows" =~ ^[0-9]+$ ]] || rows=24; [[ "$cols" =~ ^[0-9]+$ ]] || cols=80
+        h=$((rows-4)); ((h<12)) && h=12; ((h>40)) && h=40
+        w=$((cols-6)); ((w<70)) && w=70; ((w>120)) && w=120
+        "$DIALOG" --title "$title  ↑↓/PgUp/PgDn — прокрутка, Enter — закрыть" \
+                  --scrolltext --textbox "$tmp" "$h" "$w" 1>&2
         rm -f "$tmp"
     else
         printf '%b\n' "$text" | ${PAGER:-less} >/dev/tty 2>/dev/tty || printf '%b\n' "$text" >&2

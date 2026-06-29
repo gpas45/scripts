@@ -87,19 +87,13 @@ ui_msg() { # ui_msg "текст"
     if [[ -n "$DIALOG" ]]; then "$DIALOG" --msgbox "$1" 16 78 1>&2; else echo -e "$1" >&2; fi
 }
 
-# Прокручиваемый просмотр длинного текста (список экземпляров и т.п.).
-# whiptail-textbox рисует полосу прокрутки малозаметно (сливается с рамкой), поэтому
-# по возможности показываем через less: внизу всегда видна строка положения
-# («строки X–Y из N») и подсказка по клавишам — однозначно видно, что есть прокрутка.
-# Фолбэк: whiptail --textbox --scrolltext; затем простой вывод.
+# Прокручиваемый просмотр длинного текста (список экземпляров и т.п.) — псевдографика.
+# whiptail --textbox --scrolltext (полоса прокрутки справа малозаметна, поэтому в
+# заголовок вынесена подсказка по клавишам). Высота окна — под терминал.
+# Фолбэк, если whiptail недоступен: пейджер less, затем простой вывод.
 ui_textbox() { # ui_textbox "заголовок" "текст"
-    local title=$1 text=$2 pager
-    pager=$(command -v less || true)
-    if [[ -n "$pager" ]]; then
-        printf '%b\n' "$text" | LESSSECURE=1 "$pager" -K \
-            -Pm"$title  ·  строки %lt–%lb из %L  ·  ↑↓ PgUp PgDn — листать, q — выход" \
-            >/dev/tty 2>/dev/tty
-    elif [[ -n "$DIALOG" ]]; then
+    local title=$1 text=$2
+    if [[ -n "$DIALOG" ]]; then
         local tmp; tmp=$(mktemp) || { ui_msg "$text"; return; }
         printf '%b\n' "$text" > "$tmp"
         local rows cols h w
@@ -110,6 +104,10 @@ ui_textbox() { # ui_textbox "заголовок" "текст"
         "$DIALOG" --title "$title  ↑↓/PgUp/PgDn — прокрутка, Enter — закрыть" \
                   --scrolltext --textbox "$tmp" "$h" "$w" 1>&2
         rm -f "$tmp"
+    elif command -v less >/dev/null; then
+        printf '%b\n' "$text" | LESSSECURE=1 less -K \
+            -Pm"$title  ·  строки %lt–%lb из %L  ·  ↑↓ PgUp PgDn — листать, q — выход" \
+            >/dev/tty 2>/dev/tty
     else
         printf '%b\n' "$text" >&2
     fi

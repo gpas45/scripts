@@ -183,7 +183,7 @@ systemctl reload postgrespro-$PGVER
 ```bash
 : "${PGVER:?задайте: export PGVER=1c-18}"
 export PORT=5433
-export DDIR="/var/lib/pgpro/$PGVER/$PORT"      # каталог = номер порта (НЕ data-5433)
+export DDIR="/var/lib/pgpro/$PGVER/data-$PORT" # каталог = data-<порт> (в пару к дефолтному data)
 export UNIT="postgrespro-$PGVER-$PORT"
 export DEFDIR="/var/lib/pgpro/$PGVER/data"     # каталог дефолтного кластера
 ```
@@ -254,7 +254,7 @@ systemctl status "$UNIT" --no-pager
 ```
 
 ### 5.5 Пароль/.pgpass/pg_hba для экземпляра
-Повторите раздел 4, подставив `PORT=5433`, `DDIR=/var/lib/pgpro/$PGVER/5433`,
+Повторите раздел 4, подставив `PORT=5433`, `DDIR=/var/lib/pgpro/$PGVER/data-5433`,
 а в `systemctl reload` укажите `$UNIT`.
 
 ---

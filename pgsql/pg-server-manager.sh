@@ -294,10 +294,11 @@ instance_ver() {
     [[ $1 =~ ^postgrespro-(1c-[0-9]+) ]] && echo "${BASH_REMATCH[1]}"
 }
 
-# Каталог данных экземпляра. default -> <DATA_BASE>/<ver>/data; кастом -> <DATA_BASE>/<ver>/<name>
+# Каталог данных экземпляра. default -> <DATA_BASE>/<ver>/data; кастом -> <DATA_BASE>/<ver>/data-<name>
+# (имя кастомного экземпляра = порт, поэтому каталог получается data-<порт>)
 instance_datadir() {
     local ver=$1 name=$2
-    if [[ "$name" == "default" ]]; then echo "$DATA_BASE/$ver/data"; else echo "$DATA_BASE/$ver/$name"; fi
+    if [[ "$name" == "default" ]]; then echo "$DATA_BASE/$ver/data"; else echo "$DATA_BASE/$ver/data-$name"; fi
 }
 
 # Порт экземпляра: из postgresql.conf каталога данных (по умолчанию 5432)

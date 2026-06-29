@@ -260,17 +260,50 @@ stock_unit_path() {
     return 1
 }
 
-# Все экземпляры релиза: дефолтный (postgrespro-<ver>) + кастомные (postgrespro-<ver>-*)
+# Шаблонный systemd-юнит релиза (postgrespro-<ver>@.service), если пакет его даёт.
+# Новые сборки Postgres Pro используют его для нескольких кластеров (экземпляр = @<порт>).
+template_unit_path() {
+    local ver=$1 p
+    for p in "/lib/systemd/system/postgrespro-$ver@.service" \
+             "/usr/lib/systemd/system/postgrespro-$ver@.service"; do
+        [[ -f "$p" ]] && { echo "$p"; return 0; }
+    done
+    return 1
+}
+
+# Реально ли существует экземпляр с таким именем юнита (а не просто резолвится шаблоном).
+instance_exists() {
+    local u=$1
+    systemctl is-active  --quiet "$u" 2>/dev/null && return 0
+    systemctl is-enabled --quiet "$u" 2>/dev/null && return 0
+    [[ -d "$SYSTEMD_DIR/$u.service.d" ]] && return 0
+    [[ -f "$SYSTEMD_DIR/$u.service"   ]] && return 0
+    compgen -G "$SYSTEMD_DIR/*.wants/$u.service" >/dev/null 2>&1 && return 0
+    return 1
+}
+
+# Все экземпляры релиза:
+#   • дефолтный  postgrespro-<ver>
+#   • legacy dash postgrespro-<ver>-<имя>   (созданные старой схемой этого скрипта)
+#   • шаблонные   postgrespro-<ver>@<порт>  (штатная схема пакета)
 # Возвращает имена юнитов (без .service).
 discover_instances() {
-    local ver=$1
+    local ver=$1 f
     {
         [[ -n "$(stock_unit_path "$ver")" ]] && echo "postgrespro-$ver"
-        local f
+        # legacy dash-экземпляры — отдельные файлы юнитов
         for f in "$SYSTEMD_DIR"/postgrespro-"$ver"-*.service; do
             [[ -f "$f" ]] || continue
             basename "$f" .service
         done
+        # шаблонные @-экземпляры: enabled-симлинки в *.wants/
+        for f in "$SYSTEMD_DIR"/*.wants/postgrespro-"$ver"@*.service; do
+            [[ -e "$f" ]] || continue
+            basename "$f" .service
+        done
+        # шаблонные @-экземпляры: загруженные/активные (на случай не-enabled, но запущенных)
+        systemctl list-units --all --type=service "postgrespro-$ver@*" --no-legend --no-pager 2>/dev/null \
+            | awk '{print $1}' | grep -E "^postgrespro-$ver@.+\.service$" | sed 's/\.service$//'
     } | sort -u
 }
 
@@ -283,10 +316,15 @@ discover_all_instances() {
     done < <(discover_installed_versions)
 }
 
-# Имя экземпляра по юниту: postgrespro-1c-18 -> default; postgrespro-1c-18-buh -> buh
+# Имя экземпляра по юниту:
+#   postgrespro-1c-18        -> default
+#   postgrespro-1c-18@5433   -> 5433   (шаблонная схема)
+#   postgrespro-1c-18-buh    -> buh    (legacy dash)
 instance_name() {
     local u=$1 ver=$2
-    if [[ "$u" == "postgrespro-$ver" ]]; then echo "default"; else echo "${u#postgrespro-$ver-}"; fi
+    if   [[ "$u" == "postgrespro-$ver"   ]]; then echo "default"
+    elif [[ "$u" == "postgrespro-$ver@"* ]]; then echo "${u#postgrespro-$ver@}"
+    else echo "${u#postgrespro-$ver-}"; fi
 }
 
 # Релиз по имени юнита: postgrespro-1c-18[-name] -> 1c-18
@@ -294,26 +332,50 @@ instance_ver() {
     [[ $1 =~ ^postgrespro-(1c-[0-9]+) ]] && echo "${BASH_REMATCH[1]}"
 }
 
-# Реальный PGDATA экземпляра из systemd (drop-in override / EnvironmentFile).
-# Пусто, если не задан (юнит не существует или путь не прописан).
+# Реальный PGDATA существующего экземпляра. Пусто, если экземпляр не существует
+# или путь не определить. Источники по очереди:
+#   1) Environment=PGDATA=  (legacy dash-экземпляры этого скрипта кладут его сюда);
+#   2) аргумент -D работающего процесса (универсально, в т.ч. шаблонные @);
+#   3) PGDATA из per-instance EnvironmentFile (для остановленных шаблонных @).
+# Для @-юнитов сначала убеждаемся, что экземпляр реально есть (иначе шаблон
+# подставит общий EnvironmentFile дефолтного кластера и путь будет неверным).
 unit_pgdata() {
-    systemctl show "$1" -p Environment --no-pager 2>/dev/null \
-        | tr ' ' '\n' | sed -n 's/^PGDATA=//p' | head -n1
+    local unit=$1 pid pgdata envfile last
+    [[ "$unit" == *@* ]] && { instance_exists "$unit" || return 0; }
+    pgdata=$(systemctl show "$unit" -p Environment --no-pager 2>/dev/null \
+             | tr ' ' '\n' | sed -n 's/^PGDATA=//p' | head -n1)
+    [[ -n "$pgdata" ]] && { echo "$pgdata"; return 0; }
+    pid=$(systemctl show "$unit" -p MainPID --value 2>/dev/null)
+    if [[ "$pid" =~ ^[0-9]+$ && "$pid" -gt 0 && -r /proc/$pid/cmdline ]]; then
+        pgdata=$(tr '\0' '\n' < "/proc/$pid/cmdline" 2>/dev/null | awk '/^-D$/{getline; print; exit}')
+        [[ -n "$pgdata" ]] && { echo "$pgdata"; return 0; }
+    fi
+    # EnvironmentFiles перечислены в порядке применения; per-instance идёт последним
+    # и перекрывает общий — берём ПОСЛЕДНИЙ, где задан PGDATA.
+    last=""
+    while read -r envfile; do
+        [[ -r "$envfile" ]] || continue
+        local v; v=$(sed -n 's/^[[:space:]]*PGDATA=//p' "$envfile" 2>/dev/null | tail -n1)
+        [[ -n "$v" ]] && last="$v"
+    done < <(systemctl show "$unit" -p EnvironmentFiles --no-pager 2>/dev/null \
+             | sed -n 's/^EnvironmentFiles=//p' | sed 's/ (ignore_errors=[^)]*)//g' | tr ' ' '\n')
+    [[ -n "$last" ]] && echo "$last"
 }
 
 # Каталог данных экземпляра.
 #   default -> <DATA_BASE>/<ver>/data
-#   кастом  -> реальный PGDATA из systemd, если юнит уже есть (устойчиво к старой
-#              схеме <DATA_BASE>/<ver>/<порт>); иначе вычисляемый <DATA_BASE>/<ver>/data-<name>
-#              (имя = порт), который используется при СОЗДАНИИ нового экземпляра.
+#   кастом  -> реальный PGDATA существующего экземпляра (пробуем шаблонный @ и dash,
+#              устойчиво к старой схеме <ver>/<порт>); иначе вычисляемый
+#              <DATA_BASE>/<ver>/data-<name> (имя = порт) — для СОЗДАНИЯ нового.
 instance_datadir() {
     local ver=$1 name=$2 pgdata
     if [[ "$name" == "default" ]]; then echo "$DATA_BASE/$ver/data"; return; fi
-    pgdata=$(unit_pgdata "postgrespro-$ver-$name")
+    pgdata=$(unit_pgdata "postgrespro-$ver@$name")
+    [[ -z "$pgdata" ]] && pgdata=$(unit_pgdata "postgrespro-$ver-$name")
     echo "${pgdata:-$DATA_BASE/$ver/data-$name}"
 }
 
-# Порт экземпляра: из postgresql.conf каталога данных (по умолчанию 5432)
+# Порт экземпляра из postgresql.conf каталога данных (по умолчанию 5432)
 instance_port() {
     local datadir=$1 p=""
     [[ -f "$datadir/postgresql.conf" ]] && \
@@ -322,11 +384,25 @@ instance_port() {
     echo "${p:-5432}"
 }
 
-# Порт занят: либо слушается, либо уже назначен какому-то экземпляру (любого релиза)
+# Порт экземпляра с учётом юнита: сначала postgresql.conf, затем systemd PGPORT
+# (шаблонные @-экземпляры задают порт через Environment=PGPORT=%I), иначе 5432.
+unit_pgport() {
+    local u=$1 datadir=$2 p
+    p=$(instance_port "$datadir")
+    [[ "$p" != "5432" ]] && { echo "$p"; return; }
+    [[ -f "$datadir/postgresql.conf" ]] && grep -qE '^[[:space:]]*port[[:space:]]*=' "$datadir/postgresql.conf" 2>/dev/null \
+        && { echo "$p"; return; }   # порт явно задан как 5432
+    p=$(systemctl show "$u" -p Environment --no-pager 2>/dev/null \
+        | tr ' ' '\n' | sed -n 's/^PGPORT=//p' | head -n1)
+    echo "${p:-5432}"
+}
+
+# Порт занят: слушается, либо назначен dash-юниту, либо есть drop-in @-экземпляра
 port_taken() {
     local port=$1 f
     ss -tulpn 2>/dev/null | grep -qE ":${port}\b" && return 0
-    for f in "$SYSTEMD_DIR"/postgrespro-*-"$port".service; do
+    for f in "$SYSTEMD_DIR"/postgrespro-*-"$port".service \
+             "$SYSTEMD_DIR"/postgrespro-*@"$port".service.d; do
         [[ -e "$f" ]] && return 0
     done
     return 1
@@ -344,7 +420,7 @@ instance_desc() {
     local u=$1 ver name datadir port st
     ver=$(instance_ver "$u"); name=$(instance_name "$u" "$ver")
     datadir=$(instance_datadir "$ver" "$name")
-    port=$(instance_port "$datadir")
+    port=$(unit_pgport "$u" "$datadir")
     st=$(systemctl is-active "$u" 2>/dev/null || echo "?")
     echo "$name · $ver · порт $port · $st"
 }
@@ -699,11 +775,9 @@ remove_release() {
         [[ -z "$u" ]] && continue
         run_cmd "systemctl stop $u" "Остановка $u"
         run_cmd "systemctl disable $u" "Отключение $u"
-        # удаляем кастомные юниты (дефолтный принадлежит пакету)
+        # удаляем файлы кастомных экземпляров (дефолтный и шаблон принадлежат пакету)
         if [[ "$u" != "postgrespro-$ver" ]]; then
-            rm -f "$SYSTEMD_DIR/$u.service"
-            rm -rf "$SYSTEMD_DIR/$u.service.d"
-            rm -f "/etc/default/$u"
+            cleanup_instance_files "$u" "$ver" "$(instance_name "$u" "$ver")"
         fi
     done < <(discover_instances "$ver")
     run_cmd "systemctl daemon-reload" "Перезагрузка systemd"
@@ -753,7 +827,7 @@ list_instances_text() {
     while read -r u; do
         [[ -z "$u" ]] && continue
         ver=$(instance_ver "$u"); name=$(instance_name "$u" "$ver")
-        datadir=$(instance_datadir "$ver" "$name"); port=$(instance_port "$datadir")
+        datadir=$(instance_datadir "$ver" "$name"); port=$(unit_pgport "$u" "$datadir")
         st=$(systemctl is-active "$u" 2>/dev/null || echo unknown)
         out+="• $name (релиз $ver, порт $port, $st)\n    юнит: $u\n    данные: $datadir\n"
     done < <(discover_all_instances)
@@ -761,29 +835,80 @@ list_instances_text() {
     echo -e "$out"
 }
 
+# Прописать systemd-обвязку экземпляра под ШАБЛОННУЮ схему (postgrespro-<ver>@<порт>),
+# точно как штатный тулинг Postgres Pro: per-instance EnvironmentFile с PGDATA +
+# универсальный drop-in (через %I), который тянет этот файл и задаёт PGPORT.
+wire_template_instance() {
+    local ver=$1 name=$2 datadir=$3 unit="postgrespro-$ver@$name"
+    cat > "/etc/default/postgrespro-$ver-$name" <<EOF
+PGDATA=$datadir
+EOF
+    mkdir -p "$SYSTEMD_DIR/$unit.service.d"
+    cat > "$SYSTEMD_DIR/$unit.service.d/override.conf" <<EOF
+[Unit]
+Description=Postgres Pro $ver database server on port %I
+
+[Service]
+EnvironmentFile=/etc/default/postgrespro-$ver-%I
+Environment=PGPORT=%I
+EOF
+}
+
+# Прописать обвязку под LEGACY dash-схему (для пакетов без шаблонного @-юнита):
+# копия штатного юнита, переключённая на собственный EnvironmentFile, + drop-in.
+wire_dash_instance() {
+    local ver=$1 name=$2 datadir=$3 port=$4 stock=$5 unit="postgrespro-$ver-$name"
+    local defdir; defdir=$(instance_datadir "$ver" default)
+    cat > "/etc/default/$unit" <<EOF
+PGDATA=$datadir
+PGPORT=$port
+EOF
+    cp "$stock" "$SYSTEMD_DIR/$unit.service"
+    sed -i \
+        -e "s#/etc/default/postgrespro-$ver\b#/etc/default/$unit#g" \
+        -e "s#$defdir#$datadir#g" \
+        "$SYSTEMD_DIR/$unit.service"
+    mkdir -p "$SYSTEMD_DIR/$unit.service.d"
+    cat > "$SYSTEMD_DIR/$unit.service.d/override.conf" <<EOF
+[Service]
+Environment=PGDATA=${datadir}
+Environment=PGPORT=${port}
+PIDFile=${datadir}/postmaster.pid
+EOF
+}
+
 create_instance() {
     local ver; ver=$(pick_installed_version "Экземпляр: релиз") || return
     local bin; bin=$(pg_bin "$ver")
     [[ -x "$bin/initdb" ]] || { ui_msg "initdb не найден для $ver"; return; }
-    local stock; stock=$(stock_unit_path "$ver") || { ui_msg "Штатный systemd-юнит postgrespro-$ver.service не найден"; return; }
+
+    # Выбор схемы: если пакет даёт шаблонный @-юнит — используем его (как на проде),
+    # иначе откатываемся на самодельную копию штатного юнита (legacy dash).
+    local tmpl stock scheme unit
+    if tmpl=$(template_unit_path "$ver"); then
+        scheme="template"
+    elif stock=$(stock_unit_path "$ver"); then
+        scheme="dash"
+    else
+        ui_msg "Не найден ни шаблонный (postgrespro-$ver@.service), ни штатный (postgrespro-$ver.service) юнит."; return
+    fi
 
     # Локаль ru_RU.UTF-8 обязательна — initdb ниже инициализирует кластер с --locale=$DEF_LOCALE
     ensure_locales || return
 
-    # Имя экземпляра = номер порта (по аналогии с 1С, где имя кодирует идентичность).
-    # Подсказываем следующий свободный порт.
+    # Имя экземпляра = номер порта (идентичность кодируется портом). Подсказываем свободный.
     local sp; sp=$(suggest_port)
     local port; port=$(ui_input "Порт нового экземпляра (он же имя экземпляра)" "$sp") || return
     [[ "$port" =~ ^[0-9]+$ ]] || { ui_msg "Порт должен быть числом"; return; }
     local name="$port"
-    local unit="postgrespro-$ver-$name"
-    local datadir; datadir=$(instance_datadir "$ver" "$name")
+    [[ "$scheme" == "template" ]] && unit="postgrespro-$ver@$name" || unit="postgrespro-$ver-$name"
+    # Новые экземпляры — всегда в каталоге data-<порт> (схема прода)
+    local datadir="$DATA_BASE/$ver/data-$name"
 
-    if [[ -f "$SYSTEMD_DIR/$unit.service" ]]; then
+    if instance_exists "$unit"; then
         ui_yesno "Экземпляр на порту $port уже существует. Пересоздать?" || return
         run_cmd "systemctl stop $unit 2>/dev/null || true" "Остановка $unit"
     else
-        # Новый экземпляр: порт не должен быть занят (слушается или назначен другому экземпляру)
         if port_taken "$port"; then ui_msg "Порт $port уже занят (слушается или назначен другому экземпляру)"; return; fi
     fi
 
@@ -811,36 +936,32 @@ create_instance() {
     fi
     chown -R postgres:postgres "$datadir" 2>/dev/null
 
-    # Штатный юнит берёт PGDATA из /etc/default/postgrespro-<ver> (каталог ДЕФОЛТНОГО
-    # кластера) и/или прописывает путь жёстко в ExecStart/PIDFile. Чтобы экземпляр
-    # запускался со своим каталогом, делаем три вещи:
-    #   1) собственный EnvironmentFile экземпляра с его PGDATA/PGPORT;
-    #   2) копию юнита переключаем на этот EnvironmentFile и заменяем в ней жёсткие
-    #      пути дефолтного каталога на каталог экземпляра;
-    #   3) drop-in с явными PGDATA/PGPORT/PIDFile — как финальная гарантия.
-    local defdir; defdir=$(instance_datadir "$ver" default)
-    cat > "/etc/default/$unit" <<EOF
-PGDATA=$datadir
-PGPORT=$port
-EOF
-    cp "$stock" "$SYSTEMD_DIR/$unit.service"
-    sed -i \
-        -e "s#/etc/default/postgrespro-$ver\b#/etc/default/$unit#g" \
-        -e "s#$defdir#$datadir#g" \
-        "$SYSTEMD_DIR/$unit.service"
-    mkdir -p "$SYSTEMD_DIR/$unit.service.d"
-    cat > "$SYSTEMD_DIR/$unit.service.d/override.conf" <<EOF
-[Service]
-Environment=PGDATA=${datadir}
-Environment=PGPORT=${port}
-PIDFile=${datadir}/postmaster.pid
-EOF
+    # systemd-обвязка по выбранной схеме
+    if [[ "$scheme" == "template" ]]; then
+        wire_template_instance "$ver" "$name" "$datadir"
+    else
+        wire_dash_instance "$ver" "$name" "$datadir" "$port" "$stock"
+    fi
+
     run_cmd "systemctl daemon-reload" "Перезагрузка systemd"
     run_cmd "systemctl enable $unit" "Автозапуск экземпляра $name"
     if run_cmd "systemctl start $unit" "Запуск экземпляра $name"; then
-        ui_msg "Экземпляр на порту $port создан (имя = $name).\nРелиз: $ver\nКаталог: $datadir\nЮнит: $unit"
+        ui_msg "Экземпляр на порту $port создан (имя = $name, схема: $scheme).\nРелиз: $ver\nКаталог: $datadir\nЮнит: $unit"
     else
         ui_msg "Экземпляр создан, но не запустился. См. journalctl -u $unit"
+    fi
+}
+
+# Удалить systemd-файлы экземпляра (без каталога данных). Шаблон @ пакетный — не трогаем.
+cleanup_instance_files() {
+    local u=$1 ver=$2 name=$3
+    if [[ "$u" == *@* ]]; then
+        rm -rf "$SYSTEMD_DIR/$u.service.d"
+        rm -f  "/etc/default/postgrespro-$ver-$name"
+    else
+        rm -f  "$SYSTEMD_DIR/$u.service"
+        rm -rf "$SYSTEMD_DIR/$u.service.d"
+        rm -f  "/etc/default/$u"
     fi
 }
 
@@ -859,9 +980,7 @@ remove_instance() {
     fi
     run_cmd "systemctl stop $u" "Остановка $name"
     run_cmd "systemctl disable $u" "Отключение $name"
-    rm -f "$SYSTEMD_DIR/$u.service"
-    rm -rf "$SYSTEMD_DIR/$u.service.d"
-    rm -f "/etc/default/$u"
+    cleanup_instance_files "$u" "$ver" "$name"
     run_cmd "systemctl daemon-reload" "Перезагрузка systemd"
     if [[ -d "$datadir" ]]; then
         if ui_confirm_text "Удалить каталог данных $datadir?\nВсе базы этого экземпляра будут БЕЗВОЗВРАТНО удалены." "$name"; then
@@ -924,7 +1043,7 @@ write_pgpass() {
 set_postgres_password() {
     local u=$1 ver name datadir port pass
     ver=$(instance_ver "$u"); name=$(instance_name "$u" "$ver")
-    datadir=$(instance_datadir "$ver" "$name"); port=$(instance_port "$datadir")
+    datadir=$(instance_datadir "$ver" "$name"); port=$(unit_pgport "$u" "$datadir")
     local bin; bin=$(pg_bin "$ver")
     systemctl is-active --quiet "$u" || { ui_msg "Экземпляр $name не запущен — сначала запустите его"; return; }
     pass=$(ui_password "Новый пароль пользователя postgres (пусто — сгенерировать)") || return
@@ -946,7 +1065,11 @@ set_postgres_password() {
 change_port() {
     local u=$1 ver name datadir cur new
     ver=$(instance_ver "$u"); name=$(instance_name "$u" "$ver")
-    datadir=$(instance_datadir "$ver" "$name"); cur=$(instance_port "$datadir")
+    if [[ "$u" == *@* ]]; then
+        ui_msg "У шаблонного экземпляра порт = имя ($name) и зашит в имя юнита ($u).\nСменить порт = пересоздать экземпляр на новом порту: удалите этот и создайте новый\n(меню «Экземпляры» → «Удалить» / «Создать»)."
+        return
+    fi
+    datadir=$(instance_datadir "$ver" "$name"); cur=$(unit_pgport "$u" "$datadir")
     new=$(ui_input "Новый порт экземпляра $name" "$cur") || return
     [[ "$new" =~ ^[0-9]+$ ]] || { ui_msg "Порт должен быть числом"; return; }
     if [[ "$new" != "$cur" ]] && ss -tulpn 2>/dev/null | grep -qE ":${new}\b"; then ui_msg "Порт $new уже занят"; return; fi

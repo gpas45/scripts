@@ -180,6 +180,14 @@ systemctl reload postgrespro-$PGVER
 Несколько кластеров `pg-setup` не умеет, поэтому экземпляр собирается вручную: отдельный
 каталог + копия юнита + персональный `EnvironmentFile` + drop-in. **Имя экземпляра = порт.**
 
+> **Если пакет даёт шаблонный юнит** `postgrespro-<ver>@.service` (новые сборки PG Pro) —
+> предпочтительнее штатная шаблонная схема `postgrespro-<ver>@<порт>`: каталог
+> `/var/lib/pgpro/<ver>/data-<порт>`, per-instance `EnvironmentFile`
+> `/etc/default/postgrespro-<ver>-<порт>` с `PGDATA=…`, и универсальный drop-in
+> (`EnvironmentFile=/etc/default/postgrespro-<ver>-%I`, `Environment=PGPORT=%I`), затем
+> `systemctl enable --now postgrespro-<ver>@<порт>`. `pg-server-manager.sh` выбирает эту
+> схему автоматически, если шаблон есть; ниже описан запасной вариант с копией юнита.
+
 ```bash
 : "${PGVER:?задайте: export PGVER=1c-18}"
 export PORT=5433

@@ -294,11 +294,23 @@ instance_ver() {
     [[ $1 =~ ^postgrespro-(1c-[0-9]+) ]] && echo "${BASH_REMATCH[1]}"
 }
 
-# Каталог данных экземпляра. default -> <DATA_BASE>/<ver>/data; кастом -> <DATA_BASE>/<ver>/data-<name>
-# (имя кастомного экземпляра = порт, поэтому каталог получается data-<порт>)
+# Реальный PGDATA экземпляра из systemd (drop-in override / EnvironmentFile).
+# Пусто, если не задан (юнит не существует или путь не прописан).
+unit_pgdata() {
+    systemctl show "$1" -p Environment --no-pager 2>/dev/null \
+        | tr ' ' '\n' | sed -n 's/^PGDATA=//p' | head -n1
+}
+
+# Каталог данных экземпляра.
+#   default -> <DATA_BASE>/<ver>/data
+#   кастом  -> реальный PGDATA из systemd, если юнит уже есть (устойчиво к старой
+#              схеме <DATA_BASE>/<ver>/<порт>); иначе вычисляемый <DATA_BASE>/<ver>/data-<name>
+#              (имя = порт), который используется при СОЗДАНИИ нового экземпляра.
 instance_datadir() {
-    local ver=$1 name=$2
-    if [[ "$name" == "default" ]]; then echo "$DATA_BASE/$ver/data"; else echo "$DATA_BASE/$ver/data-$name"; fi
+    local ver=$1 name=$2 pgdata
+    if [[ "$name" == "default" ]]; then echo "$DATA_BASE/$ver/data"; return; fi
+    pgdata=$(unit_pgdata "postgrespro-$ver-$name")
+    echo "${pgdata:-$DATA_BASE/$ver/data-$name}"
 }
 
 # Порт экземпляра: из postgresql.conf каталога данных (по умолчанию 5432)

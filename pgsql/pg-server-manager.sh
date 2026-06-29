@@ -87,6 +87,20 @@ ui_msg() { # ui_msg "текст"
     if [[ -n "$DIALOG" ]]; then "$DIALOG" --msgbox "$1" 16 78 1>&2; else echo -e "$1" >&2; fi
 }
 
+# Прокручиваемый просмотр длинного текста (список экземпляров и т.п.).
+# msgbox обрезает длинный вывод без скролла — здесь используем --textbox --scrolltext.
+ui_textbox() { # ui_textbox "заголовок" "текст"
+    local title=$1 text=$2
+    if [[ -n "$DIALOG" ]]; then
+        local tmp; tmp=$(mktemp) || { ui_msg "$text"; return; }
+        printf '%b\n' "$text" > "$tmp"
+        "$DIALOG" --title "$title" --scrolltext --textbox "$tmp" 22 78 1>&2
+        rm -f "$tmp"
+    else
+        printf '%b\n' "$text" | ${PAGER:-less} >/dev/tty 2>/dev/tty || printf '%b\n' "$text" >&2
+    fi
+}
+
 ui_yesno() { # ui_yesno "вопрос" -> 0 (да) / 1 (нет)
     if [[ -n "$DIALOG" ]]; then
         "$DIALOG" --yesno "$1" 12 78 1>&2
@@ -1135,7 +1149,7 @@ menu_instances() {
             control   "Запуск/остановка/статус" \
             configure "Настройка (порт/пароль/доступ)") || return
         case $c in
-            list)      ui_msg "$(list_instances_text)" ;;
+            list)      ui_textbox "Экземпляры (кластеры)" "$(list_instances_text)" ;;
             create)    create_instance ;;
             remove)    remove_instance ;;
             control)   control_instance ;;
@@ -1168,7 +1182,7 @@ main() {
             motd)      menu_motd ;;
             versions)
                 local list; list=$(discover_installed_versions)
-                ui_msg "Установленные релизы:\n${list:-нет}\n\nЭкземпляры:\n$(list_instances_text)" ;;
+                ui_textbox "Релизы и экземпляры" "Установленные релизы:\n${list:-нет}\n\nЭкземпляры:\n$(list_instances_text)" ;;
         esac
     done
 }

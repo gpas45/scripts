@@ -167,11 +167,16 @@ ui_menu() {
     if [[ -n "$DIALOG" ]]; then
         local margs=()
         for i in "${!tags[@]}"; do margs+=( "$((i+1))" "${descs[$i]}" ); done
-        local h=$(( n + 8 )); (( h > 22 )) && h=22
+        # Высота окна — под терминал; высота СПИСКА (4-й арг whiptail) не должна
+        # превышать внутреннюю область окна, иначе пункты рисуются поверх рамки.
+        # Если пунктов больше — whiptail сам включит прокрутку внутри меню.
+        local rows; rows=$(tput lines 2>/dev/null || echo 24); [[ "$rows" =~ ^[0-9]+$ ]] || rows=24
+        local h=$(( n + 8 )); (( h > rows - 2 )) && h=$(( rows - 2 )); (( h < 10 )) && h=10
+        local listh=$(( h - 8 )); (( listh < 3 )) && listh=3; (( listh > n )) && listh=$n
         local sel
         sel=$("$DIALOG" --clear --title " $title " \
               --ok-button "Выбрать" --cancel-button "${CANCEL_LABEL:-Назад}" \
-              --menu "\n$text" "$h" 76 "$n" "${margs[@]}" 3>&1 1>&2 2>&3) || return 1
+              --menu "\n$text" "$h" 76 "$listh" "${margs[@]}" 3>&1 1>&2 2>&3) || return 1
         [[ $sel =~ ^[0-9]+$ ]] || return 1
         echo "${tags[$((sel-1))]}"
     else

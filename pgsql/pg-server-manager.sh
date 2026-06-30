@@ -957,13 +957,18 @@ create_instance() {
     # Инициализация кластера от пользователя postgres
     run_cmd "$RUN_AS_PG '$bin/initdb' -D '$datadir' --locale=$DEF_LOCALE --data-checksums" "Инициализация кластера $name ($ver)" || return
 
-    # 1С-тюнинг, журналирование (log/ + lc_messages=en_US) и порт
+    # 1С-тюнинг, журналирование (log/ + lc_messages=en_US)
     apply_1c_tuning "$datadir"
     apply_log_config "$datadir"
-    if grep -qE '^[[:space:]]*#?[[:space:]]*port[[:space:]]*=' "$datadir/postgresql.conf"; then
-        sed -ri "s/^[[:space:]]*#?[[:space:]]*port[[:space:]]*=.*/port = $port/" "$datadir/postgresql.conf"
+    # Порт в postgresql.conf НЕ задаём — он приходит из systemd (PGPORT=%I в шаблоне /
+    # PGPORT в EnvironmentFile для dash), чтобы не дублировать. Если ранее строка port
+    # была — закомментируем, чтобы не конфликтовала с PGPORT.
+    sed -ri "s/^([[:space:]]*)(port[[:space:]]*=.*)/\1#\2/" "$datadir/postgresql.conf"
+    # Слушаем все интерфейсы (вместо localhost)
+    if grep -qE "^[[:space:]]*#?[[:space:]]*listen_addresses" "$datadir/postgresql.conf"; then
+        sed -ri "s/^[[:space:]]*#?[[:space:]]*listen_addresses.*/listen_addresses = '*'/" "$datadir/postgresql.conf"
     else
-        echo "port = $port" >> "$datadir/postgresql.conf"
+        echo "listen_addresses = '*'" >> "$datadir/postgresql.conf"
     fi
     chown -R postgres:postgres "$datadir" 2>/dev/null
 

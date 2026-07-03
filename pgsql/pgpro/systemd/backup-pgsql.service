@@ -6,7 +6,7 @@ After=postgrespro-1c-18.service
 [Service]
 Type=oneshot
 # Запуск от root: скрипт сам переключается на postgres через su - postgres.
-ExecStart=/var/lib/pgpro/_backup/scripts/wal-g-backup-all.sh
+ExecStart=/var/lib/pgpro/_backup/scripts/wal-g-manager.sh backup-all
 Environment="PATH=/sbin:/bin:/usr/sbin:/usr/bin"
 
 [Install]

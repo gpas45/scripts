@@ -1,6 +1,6 @@
 # scripts
 
-Коллекция скриптов для администрирования инфраструктуры: PostgreSQL для 1С, Windows (1С, RD Gateway, развёртывание), MikroTik RouterOS, Proxmox, мониторинг Zabbix.
+Коллекция скриптов для администрирования инфраструктуры: 1С, PostgreSQL для 1С, Windows (RD Gateway, развёртывание), MikroTik RouterOS, Proxmox, мониторинг Zabbix.
 
 Сюда консолидировано содержимое репозиториев `RouterOS`, `proxmox` и `win` — теперь всё в одном месте.
 
@@ -10,7 +10,8 @@
 
 | Папка | Содержимое |
 |---|---|
-| [`windows/`](windows/) | PowerShell-скрипты для Windows (1С, RD Gateway) + `oobe/` — автоустановка Windows. |
+| [`1c/`](1c/) | Windows-скрипты для 1С:Предприятие (исключения Defender, раздача баз, очистка кэша). |
+| [`windows/`](windows/) | PowerShell-скрипты для Windows (RD Gateway) + `oobe/` — автоустановка Windows. |
 | [`pgsql/`](pgsql/) | PostgreSQL / Postgres Pro: установка, бэкапы, отказоустойчивость (`failover/`, `pgpro/`). |
 | [`routeros/`](routeros/) | Скрипты и конфиги MikroTik RouterOS + `docs/` (Obsidian-документация). |
 | [`proxmox/`](proxmox/) | Скрипты для Proxmox VE. |

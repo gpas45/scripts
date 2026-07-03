@@ -1,13 +1,12 @@
 # windows/
 
-PowerShell-скрипты для Windows (1С, RD Gateway) и автоустановка Windows.
+PowerShell-скрипты для Windows (RD Gateway) и автоустановка Windows.
+
+Скрипты для 1С вынесены в [`1c/`](../1c/).
 
 | Скрипт | Назначение |
 |---|---|
-| `1CDefenderExclusion.ps1` | Добавляет исключения 1С в Windows Defender: каталоги платформы и файловых баз (из `ibases.v8i` всех профилей), расширения и процессы. Запуск от администратора. |
-| `Replace-1C-Ibases.ps1` | Раздаёт эталонный `ibases.v8i` (список баз 1С) пользователям группы `1C_all` с бэкапом старых файлов. Интерактивный выбор пользователей. |
 | `Update-RDGWCertificate.ps1` | Получение/продление сертификата Let's Encrypt через Posh-ACME (DNS-плагин Beget) и установка на RD Gateway. Для планировщика: одно задание раз в сутки с наивысшими правами. Сохранять в UTF-8 with BOM. |
-| `1CDefenderExclusion.bat` | Лаунчер для `1CDefenderExclusion.ps1` (запуск двойным кликом). |
 
 ## oobe/
 

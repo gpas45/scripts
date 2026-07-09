@@ -66,6 +66,22 @@ try {
     # --- ACME-сервер ---
     Set-PAServer LE_PROD      # для тестов: Set-PAServer LE_STAGE
 
+    # --- ACME-аккаунт ---
+    # Get-PAOrder бросает terminating-ошибку через throw (а не Write-Error),
+    # поэтому -ErrorAction SilentlyContinue её не гасит — аккаунт нужно
+    # создать/выбрать заранее, иначе на первом запуске скрипт падает здесь.
+    $account = Get-PAAccount -List | Where-Object { $_.status -eq 'valid' } | Select-Object -First 1
+    if (-not $account) {
+        Write-ToEventLog "ACME-аккаунт не найден — создаём новый для $email"
+        $account = New-PAAccount -Contact $email -AcceptTOS
+    }
+    elseif ($account.contact -notcontains "mailto:$email") {
+        Set-PAAccount -ID $account.id -Contact $email | Out-Null
+    }
+    else {
+        Set-PAAccount -ID $account.id | Out-Null
+    }
+
     # --- Получение или продление ---
     $order = Get-PAOrder -MainDomain $certNames -ErrorAction SilentlyContinue
     if (-not $order) {

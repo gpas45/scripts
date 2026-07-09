@@ -6,6 +6,12 @@
 # иначе русские строки превратятся в кракозябры.
 # =====================================================================
 # Для планировщика достаточно одного задания раз в сутки: powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\poshacme\Update-RDGWCertificate.ps1 с галкой «Выполнять с наивысшими правами».
+# Для внепланового продления (например, при тестировании): -File C:\poshacme\Update-RDGWCertificate.ps1 -Force
+
+param(
+    # Продлить сертификат немедленно, даже если он ещё не вошёл в окно продления (~30 дней до истечения).
+    [switch]$Force
+)
 
 $ErrorActionPreference = 'Stop'
 
@@ -123,8 +129,10 @@ try {
     }
     else {
         # Submit-Renewal возвращает объект сертификата только если продление
-        # реально выполнено (по умолчанию — за ~30 дней до истечения).
-        $cert = Submit-Renewal -MainDomain $certNames
+        # реально выполнено (по умолчанию — за ~30 дней до истечения, если не указан -Force).
+        $renewParams = @{ MainDomain = $certNames }
+        if ($Force) { $renewParams.Force = $true }
+        $cert = Submit-Renewal @renewParams
         if (-not $cert) {
             Write-ToEventLog "Сертификат для $certNames ещё действителен — продление не требуется."
             return

@@ -33,6 +33,37 @@ function Write-ToEventLog {
     Write-Host "[$Type] $Message"
 }
 
+function Grant-RDGWKeyAccess {
+    # Import-PfxCertificate (его вызывает Set-RDGWCertificate) не выдаёт
+    # NETWORK SERVICE доступ к закрытому ключу — из-за этого служба TSGateway
+    # не может прочитать ключ нового сертификата и молча (или с "Отказано
+    # в доступе" при ручной привязке) не применяет его.
+    param(
+        [Parameter(Mandatory)][System.Security.Cryptography.X509Certificates.X509Certificate2]$Certificate,
+        [string]$Account = 'NT AUTHORITY\NETWORK SERVICE'
+    )
+
+    $rsaKey = [System.Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPrivateKey($Certificate)
+    if (-not $rsaKey) {
+        throw "У сертификата $($Certificate.Thumbprint) не найден закрытый ключ в LocalMachine\My."
+    }
+
+    if ($rsaKey -is [System.Security.Cryptography.RSACng]) {
+        $keyPath = Join-Path $env:ProgramData "Microsoft\Crypto\Keys\$($rsaKey.Key.UniqueName)"
+    }
+    else {
+        $keyPath = Join-Path $env:ProgramData "Microsoft\Crypto\RSA\MachineKeys\$($rsaKey.CspKeyContainerInfo.UniqueKeyContainerName)"
+    }
+    if (-not (Test-Path $keyPath)) {
+        throw "Файл закрытого ключа не найден: $keyPath"
+    }
+
+    $acl = Get-Acl -Path $keyPath
+    $rule = New-Object System.Security.AccessControl.FileSystemAccessRule($Account, 'Read', 'Allow')
+    $acl.AddAccessRule($rule)
+    Set-Acl -Path $keyPath -AclObject $acl
+}
+
 try {
     # --- Рабочий каталог ---
     if (-not (Test-Path $poshAcmeHome)) {
@@ -101,9 +132,25 @@ try {
         Write-ToEventLog "Сертификат успешно продлён."
     }
 
+    # --- Импорт сертификата и права на закрытый ключ ---
+    $x509 = Get-Item "Cert:\LocalMachine\My\$($cert.Thumbprint)" -ErrorAction SilentlyContinue
+    if (-not $x509) {
+        Write-ToEventLog "Импортируем сертификат в LocalMachine\My"
+        $x509 = Import-PfxCertificate -FilePath $cert.PfxFile -CertStoreLocation Cert:\LocalMachine\My -Password $cert.PfxPass
+    }
+    Grant-RDGWKeyAccess -Certificate $x509
+
     # --- Установка на RD Gateway ---
     # Set-RDGWCertificate идемпотентен: если отпечаток не изменился — ничего не делает.
-    $cert | Set-RDGWCertificate -RemoveOldCert
+    # -ErrorAction Stop обязателен: функция сама перехватывает свои ошибки через
+    # trap {...; return} и превращает их в non-terminating Write-Error, которая
+    # без явного -ErrorAction Stop проходит мимо try/catch этого скрипта.
+    $cert | Set-RDGWCertificate -RemoveOldCert -ErrorAction Stop
+
+    $appliedThumb = (Get-Item RDS:\GatewayServer\SSLCertificate\Thumbprint).CurrentValue
+    if ($appliedThumb -ne $cert.Thumbprint) {
+        throw "Set-RDGWCertificate завершился без ошибки, но на шлюзе установлен отпечаток $appliedThumb вместо ожидаемого $($cert.Thumbprint)."
+    }
     Write-ToEventLog "Сертификат установлен на RD Gateway. Отпечаток: $($cert.Thumbprint). Действителен до: $($cert.NotAfter)."
 }
 catch {

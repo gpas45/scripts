@@ -39,6 +39,26 @@ function Write-ToEventLog {
     Write-Host "[$Type] $Message"
 }
 
+function Get-BegetCredential {
+    # Без -ForcePrompt: берём сохранённые данные, а если файла нет —
+    # запрашиваем интерактивно (актуально при ручном запуске; при выполнении
+    # из планировщика без интерактивной сессии Get-Credential не сработает,
+    # поэтому для автоматических запусков файл должен быть создан заранее).
+    param([switch]$ForcePrompt)
+
+    if (-not $ForcePrompt -and (Test-Path $credentialFile)) {
+        return Import-Clixml -Path $credentialFile
+    }
+
+    Write-ToEventLog "Запрашиваем учётные данные Beget интерактивно." 'Warning'
+    $cred = Get-Credential -Message 'Логин и пароль от аккаунта Beget (для DNS API)'
+    if (-not $cred) {
+        throw "Учётные данные Beget не были введены."
+    }
+    $cred | Export-Clixml -Path $credentialFile
+    return $cred
+}
+
 function Grant-RDGWKeyAccess {
     # Import-PfxCertificate (его вызывает Set-RDGWCertificate) не выдаёт
     # NETWORK SERVICE доступ к закрытому ключу — из-за этого служба TSGateway
@@ -81,11 +101,7 @@ try {
     # может ТОЛЬКО тот же пользователь на той же машине. Если скрипт будет
     # выполняться планировщиком от SYSTEM, файл нужно создавать тоже от SYSTEM
     # (например, через psexec -s -i powershell).
-    if (-not (Test-Path $credentialFile)) {
-        throw "Файл с учётными данными не найден. Сохраните их от имени того же пользователя, под которым выполняется скрипт: `$cred = Get-Credential; `$cred | Export-Clixml -Path '$credentialFile'"
-    }
-    $begetCred = Import-Clixml -Path $credentialFile
-    $pArgs = @{ BegetCredential = $begetCred }
+    $pArgs = @{ BegetCredential = (Get-BegetCredential) }
 
     # --- Модули (TLS 1.2 обязателен для PSGallery на старых системах) ---
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -121,23 +137,36 @@ try {
 
     # --- Получение или продление ---
     $order = Get-PAOrder -MainDomain $certNames -ErrorAction SilentlyContinue
-    if (-not $order) {
-        Write-ToEventLog "Заказ не найден — запрашиваем новый сертификат для $certNames"
-        $cert = New-PACertificate $certNames -AcceptTOS -Contact $email -Plugin Beget -PluginArgs $pArgs
-        if (-not $cert) { throw "Не удалось получить сертификат для $certNames" }
-        Write-ToEventLog "Новый сертификат получен."
-    }
-    else {
-        # Submit-Renewal возвращает объект сертификата только если продление
-        # реально выполнено (по умолчанию — за ~30 дней до истечения, если не указан -Force).
-        $renewParams = @{ MainDomain = $certNames }
-        if ($Force) { $renewParams.Force = $true }
-        $cert = Submit-Renewal @renewParams
-        if (-not $cert) {
-            Write-ToEventLog "Сертификат для $certNames ещё действителен — продление не требуется."
-            return
+
+    # До 2 попыток: если первая упала (например, из-за устаревших/неверных
+    # учётных данных Beget), запрашиваем их заново интерактивно и повторяем.
+    for ($attempt = 1; $attempt -le 2; $attempt++) {
+        try {
+            if (-not $order) {
+                Write-ToEventLog "Заказ не найден — запрашиваем новый сертификат для $certNames"
+                $cert = New-PACertificate $certNames -AcceptTOS -Contact $email -Plugin Beget -PluginArgs $pArgs
+                if (-not $cert) { throw "Не удалось получить сертификат для $certNames" }
+                Write-ToEventLog "Новый сертификат получен."
+            }
+            else {
+                # Submit-Renewal возвращает объект сертификата только если продление
+                # реально выполнено (по умолчанию — за ~30 дней до истечения, если не указан -Force).
+                $renewParams = @{ MainDomain = $certNames }
+                if ($Force) { $renewParams.Force = $true }
+                $cert = Submit-Renewal @renewParams
+                if (-not $cert) {
+                    Write-ToEventLog "Сертификат для $certNames ещё действителен — продление не требуется."
+                    return
+                }
+                Write-ToEventLog "Сертификат успешно продлён."
+            }
+            break
         }
-        Write-ToEventLog "Сертификат успешно продлён."
+        catch {
+            if ($attempt -ge 2) { throw }
+            Write-ToEventLog "Ошибка при обращении к Beget: $($_.Exception.Message). Возможно, учётные данные устарели — запрашиваем новые." 'Warning'
+            $pArgs = @{ BegetCredential = (Get-BegetCredential -ForcePrompt) }
+        }
     }
 
     # --- Импорт сертификата и права на закрытый ключ ---

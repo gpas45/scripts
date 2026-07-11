@@ -50,6 +50,12 @@ function Get-BegetCredential {
         return Import-Clixml -Path $credentialFile
     }
 
+    if (-not [Environment]::UserInteractive) {
+        # Планировщик/SYSTEM без интерактивной сессии: Get-Credential тут либо
+        # зависнет, либо упадёт. Даём понятную инструкцию вместо этого.
+        throw "Нет действительных учётных данных Beget, а сессия неинтерактивная (планировщик). Обновите '$credentialFile' вручную от имени того пользователя, под которым выполняется задание."
+    }
+
     Write-ToEventLog "Запрашиваем учётные данные Beget интерактивно." 'Warning'
     $cred = Get-Credential -Message 'Логин и пароль от аккаунта Beget (для DNS API)'
     if (-not $cred) {
@@ -57,6 +63,36 @@ function Get-BegetCredential {
     }
     $cred | Export-Clixml -Path $credentialFile
     return $cred
+}
+
+function Test-BegetCredential {
+    # Проверяет учётные данные Beget напрямую через DNS API (dns/getData) —
+    # ДО обращения к Let's Encrypt. Плагин Beget не распознаёт отказ авторизации
+    # (проверяет только $response.answer.status), поэтому при неверном/устаревшем
+    # пароле он молча "успешно" отрабатывает, TXT-запись не создаётся, и LE
+    # позднее падает с NXDOMAIN. Отказ авторизации Beget возвращает на верхнем
+    # уровне ответа (status: error) — именно его мы здесь и ловим.
+    param([Parameter(Mandatory)][pscredential]$Credential)
+
+    $body = @{
+        login        = $Credential.UserName
+        passwd       = $Credential.GetNetworkCredential().Password
+        input_format = 'json'
+        input_data   = @{ fqdn = $certNames } | ConvertTo-Json -Compress
+    }
+    try {
+        $resp = Invoke-RestMethod -Uri 'https://api.beget.com/api/dns/getData' -Method Post -Body $body -TimeoutSec 30
+    }
+    catch {
+        # Сетевая ошибка — проверить не смогли; не блокируем, пусть решает ACME.
+        Write-ToEventLog "Не удалось проверить учётные данные Beget (сетевая ошибка): $($_.Exception.Message)" 'Warning'
+        return $true
+    }
+    # Верхнеуровневый status: error означает отказ авторизации/доступа к API.
+    if ($resp.status -eq 'error') {
+        return $false
+    }
+    return $true
 }
 
 function Grant-RDGWKeyAccess {
@@ -96,15 +132,27 @@ try {
         New-Item -ItemType Directory -Path $poshAcmeHome | Out-Null
     }
 
+    # TLS 1.2 обязателен и для PSGallery, и для Beget API на старых системах.
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
     # --- Учётные данные Beget ---
     # Внимание: Export-Clixml шифрует пароль через DPAPI — расшифровать его
     # может ТОЛЬКО тот же пользователь на той же машине. Если скрипт будет
     # выполняться планировщиком от SYSTEM, файл нужно создавать тоже от SYSTEM
     # (например, через psexec -s -i powershell).
-    $pArgs = @{ BegetCredential = (Get-BegetCredential) }
+    # Проверяем учётные данные до Let's Encrypt: если пароль сменился, повторно
+    # запрашиваем и сохраняем новый (при интерактивном запуске).
+    $begetCred = Get-BegetCredential
+    if (-not (Test-BegetCredential -Credential $begetCred)) {
+        Write-ToEventLog "Учётные данные Beget недействительны (возможно, сменился пароль) — запрашиваем новые." 'Warning'
+        $begetCred = Get-BegetCredential -ForcePrompt
+        if (-not (Test-BegetCredential -Credential $begetCred)) {
+            throw "Учётные данные Beget по-прежнему недействительны. Проверьте логин и пароль от аккаунта Beget и доступ к API (https://cp.beget.com, раздел «Управление аккаунтом» → «API»)."
+        }
+    }
+    $pArgs = @{ BegetCredential = $begetCred }
 
-    # --- Модули (TLS 1.2 обязателен для PSGallery на старых системах) ---
-    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    # --- Модули ---
     if (-not (Get-PackageProvider -Name NuGet -ListAvailable -ErrorAction SilentlyContinue)) {
         Install-PackageProvider -Name NuGet -Force | Out-Null
     }
@@ -138,35 +186,32 @@ try {
     # --- Получение или продление ---
     $order = Get-PAOrder -MainDomain $certNames -ErrorAction SilentlyContinue
 
-    # До 2 попыток: если первая упала (например, из-за устаревших/неверных
-    # учётных данных Beget), запрашиваем их заново интерактивно и повторяем.
-    for ($attempt = 1; $attempt -le 2; $attempt++) {
-        try {
-            if (-not $order) {
-                Write-ToEventLog "Заказ не найден — запрашиваем новый сертификат для $certNames"
-                $cert = New-PACertificate $certNames -AcceptTOS -Contact $email -Plugin Beget -PluginArgs $pArgs
-                if (-not $cert) { throw "Не удалось получить сертификат для $certNames" }
-                Write-ToEventLog "Новый сертификат получен."
-            }
-            else {
-                # Submit-Renewal возвращает объект сертификата только если продление
-                # реально выполнено (по умолчанию — за ~30 дней до истечения, если не указан -Force).
-                $renewParams = @{ MainDomain = $certNames }
-                if ($Force) { $renewParams.Force = $true }
-                $cert = Submit-Renewal @renewParams
-                if (-not $cert) {
-                    Write-ToEventLog "Сертификат для $certNames ещё действителен — продление не требуется."
-                    return
-                }
-                Write-ToEventLog "Сертификат успешно продлён."
-            }
-            break
+    if ($order -and $order.status -eq 'valid') {
+        # Уже есть выпущенный сертификат — продлеваем. Submit-Renewal возвращает
+        # объект только если продление реально выполнено (по умолчанию — за
+        # ~30 дней до истечения, если не указан -Force).
+        $renewParams = @{ MainDomain = $certNames }
+        if ($Force) { $renewParams.Force = $true }
+        $cert = Submit-Renewal @renewParams
+        if (-not $cert) {
+            Write-ToEventLog "Сертификат для $certNames ещё действителен — продление не требуется."
+            return
         }
-        catch {
-            if ($attempt -ge 2) { throw }
-            Write-ToEventLog "Ошибка при обращении к Beget: $($_.Exception.Message). Возможно, учётные данные устарели — запрашиваем новые." 'Warning'
-            $pArgs = @{ BegetCredential = (Get-BegetCredential -ForcePrompt) }
+        Write-ToEventLog "Сертификат успешно продлён."
+    }
+    else {
+        # Заказа нет либо прошлый не завершён (pending/invalid) — выпускаем заново.
+        Write-ToEventLog "Запрашиваем новый сертификат для $certNames"
+        $newParams = @{ AcceptTOS = $true; Contact = $email; Plugin = 'Beget'; PluginArgs = $pArgs }
+        if ($order -and $order.status -eq 'invalid') {
+            # Прошлый заказ ушёл в invalid (например, из-за неудачной DNS-проверки) —
+            # принудительно создаём новый, иначе Let's Encrypt переиспользует
+            # уже «мёртвую» авторизацию и проверка снова провалится.
+            $newParams.Force = $true
         }
+        $cert = New-PACertificate $certNames @newParams
+        if (-not $cert) { throw "Не удалось получить сертификат для $certNames" }
+        Write-ToEventLog "Новый сертификат получен."
     }
 
     # --- Импорт сертификата и права на закрытый ключ ---

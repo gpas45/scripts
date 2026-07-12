@@ -38,9 +38,15 @@
     Regex short-presentation КОРП/базовых лицензий, исключаемых из счётчика ПРОФ
     (как в статье: КОРП 500 и базовые). Проверьте формат на своей платформе.
 
+.NOTES
+    Кроссплатформенный: Windows PowerShell 5.1 (powershell) или PowerShell 7+
+    (pwsh) на Linux. Путь и имя rac (rac.exe / rac) определяются автоматически.
+
 .EXAMPLE
+    # Windows
     powershell -NoProfile -ExecutionPolicy Bypass -File 1c_cluster_ras.ps1 json
-    powershell -NoProfile -ExecutionPolicy Bypass -File 1c_cluster_ras.ps1 discovery.ib
+    # Linux
+    pwsh -NoProfile -File ./1c_cluster_ras.ps1 json -RasServer 1c-srv:1545
 #>
 [CmdletBinding()]
 param(
@@ -56,29 +62,45 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+# На Linux/pwsh в неинтерактивном режиме смена кодировки может кинуть исключение.
+try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch { }
 
-# --- Поиск rac.exe --------------------------------------------------------
+# Windows PowerShell 5.1 не определяет $IsWindows — там платформа всегда Windows.
+$script:OnWindows = ($null -eq $IsWindows) -or $IsWindows
+
+# --- Поиск rac (rac.exe / rac) -------------------------------------------
+# Кроссплатформенно: сначала PATH, затем стандартные каталоги установки платформы.
 function Resolve-RacPath {
     param([string]$Explicit)
 
     if ($Explicit) {
         if (Test-Path -LiteralPath $Explicit) { return $Explicit }
-        throw "rac.exe не найден по указанному пути: $Explicit"
+        throw "rac не найден по указанному пути: $Explicit"
     }
 
-    $roots = @(
-        "$env:ProgramFiles\1cv8",
-        "${env:ProgramFiles(x86)}\1cv8"
-    ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) }
+    if ($script:OnWindows) {
+        $racName = 'rac.exe'
+        $roots = @("$env:ProgramFiles\1cv8", "${env:ProgramFiles(x86)}\1cv8")
+    }
+    else {
+        $racName = 'rac'
+        $roots = @('/opt/1cv8', '/opt/1C', '/usr/local/1cv8', '/usr/lib/1cv8')
+    }
 
-    if (-not $roots) { throw 'Каталог платформы 1С (1cv8) не найден. Укажите путь параметром -RacPath.' }
+    # 1) rac в PATH.
+    $onPath = Get-Command $racName -CommandType Application -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    if ($onPath) { return $onPath.Source }
 
-    $rac = Get-ChildItem -Path $roots -Recurse -Filter 'rac.exe' -ErrorAction SilentlyContinue |
+    # 2) Рекурсивный поиск в каталогах установки, самая свежая версия — первой.
+    $roots = $roots | Where-Object { $_ -and (Test-Path -LiteralPath $_) }
+    if (-not $roots) { throw 'Каталог платформы 1С не найден. Укажите путь параметром -RacPath.' }
+
+    $rac = Get-ChildItem -Path $roots -Recurse -Filter $racName -ErrorAction SilentlyContinue |
         Sort-Object -Property FullName -Descending |
         Select-Object -First 1
 
-    if (-not $rac) { throw 'rac.exe не найден. Укажите путь параметром -RacPath.' }
+    if (-not $rac) { throw "$racName не найден. Укажите путь параметром -RacPath." }
     return $rac.FullName
 }
 

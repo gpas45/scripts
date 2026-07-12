@@ -104,10 +104,27 @@ Zabbix-агента (как в статье), RAS их не заменяет:
 
 | Файл | Назначение |
 |---|---|
-| `1c_cluster_ras.ps1` | Коллектор: `json` (мастер-айтем со всеми блоками), `discovery.ib` / `discovery.process` / `discovery.server`. |
-| `userparameter_1c_ras.conf` | UserParameter'ы Zabbix-агента: `onecras.json`, `onecras.discovery.*`. |
+| `1c_cluster_ras.ps1` | Кроссплатформенный коллектор: `json` (мастер-айтем со всеми блоками), `discovery.ib` / `discovery.process` / `discovery.server`. |
+| `userparameter_1c_ras.conf` | UserParameter'ы Zabbix-агента для **Windows** (`powershell`). |
+| `userparameter_1c_ras_linux.conf` | UserParameter'ы для **Linux** (`pwsh`). |
+| `template_1c_cluster_ras.yaml` | Импортируемый шаблон Zabbix 6.0: мастер-айтем, зависимые элементы, 3 LLD, триггеры. |
+
+## Кроссплатформенность
+
+Скрипт — один и тот же для Windows и Linux:
+
+* **Windows** — Windows PowerShell 5.1 (`powershell`), rac ищется в
+  `%ProgramFiles%\1cv8`;
+* **Linux** — PowerShell 7+ (`pwsh`, напр. `apt install powershell`), rac ищется
+  в `PATH`, затем в `/opt/1cv8`, `/opt/1C`, `/usr/local/1cv8`, `/usr/lib/1cv8`.
+
+Путь и имя (`rac.exe` / `rac`) определяются автоматически; переопределяются
+параметром `-RacPath`. Логика разбора и JSON — чистый PowerShell, одинаковый на
+обеих ОС.
 
 ## Установка
+
+### Windows
 
 1. Убедиться, что RAS запущен как сервис (порт 1545):
    ```
@@ -115,13 +132,33 @@ Zabbix-агента (как в статье), RAS их не заменяет:
    ```
 2. Скопировать `1c_cluster_ras.ps1` в `C:\Zabbix\Scripts\`, а
    `userparameter_1c_ras.conf` — в каталог конфигов агента.
-3. Поднять `Timeout` агента до ~30 c (опрос RAS не мгновенный).
-4. Проверить вручную:
+3. Поднять `Timeout` агента до ~30 c. Проверить:
    ```
    powershell -NoProfile -ExecutionPolicy Bypass -File C:\Zabbix\Scripts\1c_cluster_ras.ps1 json
    ```
 
+### Linux
+
+1. Убедиться, что RAS запущен (обычно systemd-юнит `srv1cv8-ras`, порт 1545),
+   и установлен `pwsh`.
+2. Скопировать `1c_cluster_ras.ps1` в `/etc/zabbix/scripts/`, а
+   `userparameter_1c_ras_linux.conf` — в `/etc/zabbix/zabbix_agentd.d/`.
+3. Поднять `Timeout` агента до ~30 c. Проверить:
+   ```
+   pwsh -NoProfile -File /etc/zabbix/scripts/1c_cluster_ras.ps1 json
+   ```
+
+4. Импортировать `template_1c_cluster_ras.yaml` в Zabbix и привязать к хосту
+   (задать макросы `{$RAS.SERVER}`, при необходимости `{$RAS.CLUSTER.USER}` /
+   `{$RAS.CLUSTER.PWD}`).
+
 ## Схема мониторинга в Zabbix (мастер-айтем)
+
+Готовый шаблон `template_1c_cluster_ras.yaml` уже реализует всё описанное ниже —
+импортируйте его и привяжите к хосту. Раздел объясняет его устройство.
+
+> Пароль администратора кластера передаётся макросом `{$RAS.CLUSTER.PWD}` — на
+> проде задайте его на хосте как **Secret text**, чтобы значение не светилось.
 
 Как и в статье — один опрос отдаёт весь JSON, метрики достаются предобработкой:
 

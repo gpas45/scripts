@@ -7,6 +7,7 @@ PostgreSQL / Postgres Pro для 1С: установка, бэкапы, отка
 | `pg_setup.sh` | Установка и первичная настройка Postgres Pro 1C на Debian/Ubuntu: локали, часовой пояс, репозиторий, initdb с `--tune=1c`, pg_hba, пароль postgres. Параметры: `--pgver`, `--timezone`, `--lang`, `--postgres-pass`. Запуск от root. |
 | `backup-db.sh` | Бэкап (pg_dump + pigz, с проверкой целостности архива) и обслуживание (vacuumdb) баз PostgreSQL / Postgres Pro по списку из файла. Ротация бэкапов отдельно по каждой БД, логов — по возрасту. Для cron. |
 | `backup-pg.conf.example` | Пример конфига для `backup-db.sh` (копируется в `/etc/backup-pg.conf`): пути, retention, каталог бинарников. |
+| `pg-status/` | Go-утилита: состояние экземпляров (кластеров) PostgreSQL / Postgres Pro — запущен/остановлен, порт, каталог и его размер, суммарный вес и список баз, аптайм, соединения, cache hit, commit/rollback. Read-only. См. `pg-status/README.md`. |
 | `pgpro/` | Рабочие скрипты Postgres Pro, перенесённые «как есть» с боевых серверов: wal-g, pg_probackup, обслуживание, добавление кластера, systemd-таймер. См. `pgpro/README.md`. |
 
 Зависимости `backup-db.sh`: `pigz`. Список баз — текстовый файл (по умолчанию `/var/lib/pgpro/scripts/DB`), по одной базе на строку, `#` — комментарий.

@@ -41,7 +41,9 @@ SAMPLE=$(systemctl list-units --all --type=service "postgrespro-${VER}@*" --no-l
   fi
 
   echo; echo "=== 5. per-instance файлы в /etc/default ==="
-  ls -la /etc/default/ 2>/dev/null | grep -i postgrespro
+  for f in /etc/default/*postgrespro*; do
+    [[ -e "$f" ]] && ls -la "$f"
+  done
   echo; echo "=== 5b. общий EnvironmentFile /etc/default/postgrespro-${VER} ==="
   cat "/etc/default/postgrespro-${VER}" 2>&1
 

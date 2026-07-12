@@ -870,7 +870,8 @@ list_instances_text() {
 # точно как штатный тулинг Postgres Pro: per-instance EnvironmentFile с PGDATA +
 # универсальный drop-in (через %I), который тянет этот файл и задаёт PGPORT.
 wire_template_instance() {
-    local ver=$1 name=$2 datadir=$3 unit="postgrespro-$ver@$name"
+    local ver=$1 name=$2 datadir=$3
+    local unit="postgrespro-$ver@$name"
     cat > "/etc/default/postgrespro-$ver-$name" <<EOF
 PGDATA=$datadir
 EOF
@@ -888,7 +889,8 @@ EOF
 # Прописать обвязку под LEGACY dash-схему (для пакетов без шаблонного @-юнита):
 # копия штатного юнита, переключённая на собственный EnvironmentFile, + drop-in.
 wire_dash_instance() {
-    local ver=$1 name=$2 datadir=$3 port=$4 stock=$5 unit="postgrespro-$ver-$name"
+    local ver=$1 name=$2 datadir=$3 port=$4 stock=$5
+    local unit="postgrespro-$ver-$name"
     local defdir; defdir=$(instance_datadir "$ver" default)
     cat > "/etc/default/$unit" <<EOF
 PGDATA=$datadir
@@ -915,8 +917,8 @@ create_instance() {
 
     # Выбор схемы: если пакет даёт шаблонный @-юнит — используем его (как на проде),
     # иначе откатываемся на самодельную копию штатного юнита (legacy dash).
-    local tmpl stock scheme unit
-    if tmpl=$(template_unit_path "$ver"); then
+    local stock scheme unit
+    if template_unit_path "$ver" >/dev/null; then
         scheme="template"
     elif stock=$(stock_unit_path "$ver"); then
         scheme="dash"

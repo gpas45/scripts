@@ -1,110 +1,152 @@
 # Мониторинг кластера 1С 8.3 в Zabbix через RAS/RAC
 
-Реализация функционала из статьи Infostart
-[«Мониторинг кластера 1С 8.3 в Zabbix»](https://infostart.ru/1c/articles/1632627/),
-но на другом источнике данных — сервере администрирования **RAS** (`ras.exe`) и
-консольном клиенте **RAC** (`rac.exe`), вместо разбора вывода счётчиков/процессов
-средствами Windows.
+Порт сборщика из статьи Infostart
+[«Мониторинг кластера 1С 8.3 в Zabbix»](https://infostart.ru/1c/articles/1632627/)
+с источника **COM+ (`V83.COMConnector`)** на штатный сервер администрирования
+**RAS** (`ras.exe`) и консольный клиент **RAC** (`rac.exe`).
 
-## Что делает статья и в чём отличие подхода
+> Это не альтернатива статье, а её же дорожная карта: в разделе «Планы по
+> развитию» автор прямо пишет, что планирует перевод мониторинга **с COM+ на
+> RAS/RAC**. Здесь этот переход и реализован.
 
-Статья решает задачу «взглядом системного администратора»: PowerShell-скриптом
-собирает показатели кластера 1С и отдаёт их в Zabbix (LLD + элементы данных).
-Собираются, по сути, те же вещи, что видит консоль администрирования: количество
-сессий и соединений, выданные лицензии, рабочие процессы `rphost` и их память,
-информационные базы.
+## Что делает статья
 
-Ключевой минус «прямого» подхода — данные берутся не из штатного API кластера, а
-косвенно (процессы ОС, счётчики, парсинг). Это привязывает мониторинг к хосту и
-ломается при смене топологии (несколько `rphost`, серверы вынесены на разные
-машины, центральный сервер отдельно от рабочего).
+Скрипт на PowerShell подключается к агенту кластера через `V83.COMConnector` и
+собирает данные в **один JSON-файл** `1c_server_data.json`, который затем парсит
+сервер Zabbix (мастер-данные + 3 правила LLD + триггеры + дашборды/Grafana).
+Структура JSON — четыре блока:
 
-**RAS/RAC** — это и есть штатный интерфейс администрирования кластера. Он отдаёт
-ровно ту же модель, что консоль администрирования, по сети, с одного места, и не
-зависит от того, где физически крутятся процессы. Поэтому тот же набор метрик
-собирается надёжнее и с любого хоста, где есть `rac.exe` и доступ к RAS
-(TCP 1545).
+1. **cluster** — параметры сервера и кластера + сводка по сеансам;
+2. **workingservers** — рабочие серверы кластера и их загрузка;
+3. **processes** — рабочие процессы `rphost` и их параметры;
+4. **bases.list** — информационные базы кластера и их параметры.
 
-## Архитектура RAS/RAC
+Коллектор в этой папке отдаёт **тот же JSON той же структуры**, но данные берёт
+из RAC.
 
-```
-Zabbix Agent (UserParameter)
-        │  powershell 1c_cluster_ras.ps1
-        ▼
-     rac.exe  ──TCP 1545──►  ras.exe (сервис)  ──►  кластер 1С (rmngr/rphost)
-```
+## Почему RAS/RAC лучше COM+
 
-* **RAS** (`ras.exe cluster`) — служба-посредник, слушает порт **1545**, ходит в
-  агент кластера (обычно 1540). Регистрируется как сервис:
-  ```
-  "C:\Program Files\1cv8\<версия>\bin\ras.exe" cluster --service --port=1545 localhost:1540
-  ```
-* **RAC** (`rac.exe`) — консольный клиент. Печатает записи блоками
-  `ключ : значение`, разделёнными пустой строкой, — их и парсит коллектор.
+| | COM+ (`V83.COMConnector`) | RAS/RAC |
+|---|---|---|
+| Разрядность | COM-объект должен совпадать по битности с процессом PowerShell | не важно, сетевой протокол |
+| Где запускать | обычно на самом сервере 1С | с любого хоста с `rac.exe` и доступом к 1545 |
+| Регистрация компоненты | нужна регистрация `comcntr.dll` | не нужна |
+| PID процессов | статья вынужденно чинит реестр `ProcessNameFormat` и матчит perfmon-счётчики `rphost_<PID>` | RAC отдаёт `pid` напрямую — хак больше не нужен |
+| Параметры ИБ | статья парсит файл реестра кластера `1CV8Clst.lst` регуляркой | `rac infobase info` (при наличии прав на ИБ) |
 
-## Соответствие метрик статьи и команд RAC
+## Соответствие: свойство COM-объекта → поле/команда RAC
 
-| Метрика (как в статье)        | Команда RAC                                   | Поле                     |
-|-------------------------------|-----------------------------------------------|--------------------------|
-| UUID кластера                 | `rac cluster list`                            | `cluster`                |
-| Список / число инфобаз        | `rac infobase summary list --cluster=<id>`    | записи, `name`           |
-| Число сессий (всего / по ИБ)  | `rac session list --cluster=<id>`             | группировка по `infobase`|
-| Число соединений              | `rac connection list --cluster=<id>`          | число записей            |
-| Выданные лицензии             | `rac license list --cluster=<id>`             | число записей            |
-| Рабочие процессы `rphost`     | `rac process list --cluster=<id>`             | `process`,`host`,`pid`   |
-| Память процесса               | ↑ то же                                       | `memory-size`            |
-| Доступная производительность  | ↑ то же                                       | `available-perfomance`   |
-| Соединений на процесс         | ↑ то же                                       | `connections`            |
-| Среднее время вызова          | ↑ то же                                       | `avg-call-time`          |
-| Блокировки                    | `rac lock list --cluster=<id>`                | число записей            |
+### Блок 1 — cluster
 
-Аутентификация кластера — флагами `--cluster-user` / `--cluster-pwd`
-(если администратор кластера задан).
+`rac cluster info --cluster=<id>` (плюс сводка по `session list` / `license list`):
+
+| Статья (COM) | RAC |
+|---|---|
+| `MaxMemorySize` | `max-memory-size` |
+| `KillByMemoryWithDump` | `kill-by-memory-with-dump` |
+| `LoadBalancingMode` | `load-balancing-mode` |
+| `SessionFaultToleranceLevel` | `session-fault-tolerance-level` |
+| `ExpirationTimeout` | `expiration-timeout` |
+| `LifeTimeLimit` | `lifetime-limit` |
+| `SecurityLevel` | `security-level` |
+| `MainPort` | `main-port` |
+| `KillProblemProcesses` | `kill-problem-processes` |
+| `sessions_count` | число записей `session list` |
+| `users_count` | число выданных клиентских лицензий (`license list` с полем `session`) |
+| `clients_count` / `ws_count` / `http_count` / `jobs_count` / `com_count` / `web_count` | группировка `session list` по `app-id` (`1CV8`/`1CV8C`, `WSConnection`, `HTTPServiceConnection`, `BackgroundJob`, `COMConnection`, `WebServerExtension`) |
+| `prolicense_count` / `prolicense_users` | `license list`, фильтр по `short-presentation` (КОРП/базовые исключаются, см. `-CorpLicensePattern`) |
+
+### Блок 2 — workingservers
+
+`rac server list --cluster=<id>`: `server`, `name`, `agent-host`, `agent-port`,
+`connections-limit`, `infobases-limit`, `memory-limit`.
+Загрузка CPU по ядрам (`counter_processor_total/12` в статье) — **в RAC
+отсутствует**, остаётся на стороне ОС (см. ниже).
+
+### Блок 3 — processes
+
+`rac process list --cluster=<id>` + группировка `session list` по `process`:
+
+| Статья | RAC |
+|---|---|
+| `PID` / `MainPort` / `HostName` / `StartedAt` | `pid` / `port` / `host` / `started-at` |
+| `MemorySize` / `connections` / `Running` / `Use` / `IsEnable` | одноимённые поля |
+| `available-perfomance`, `avg-call-time` | одноимённые поля |
+| `users` / `sessions` | подсчёт по сгруппированным сессиям процесса |
+| `session_mem` / `session_CPU` / `session_proc_took` | top-сессия процесса по `memory-current` / `cpu-time-current` / `db-proc-took` |
+| `CPU_Usage` (perfmon `rphost_<PID>`) | **нет в RAC** — остаётся на ОС |
+
+### Блок 4 — bases
+
+`rac infobase summary list --cluster=<id>` + группировка сессий по `infobase`:
+
+| Статья | RAC |
+|---|---|
+| `BaseName` / `Description` | `name` / `descr` |
+| `sessions` / `users` | подсчёт по сессиям ИБ |
+| `reglaments` | сессии с `user-name ~ ^reg\d{3}`, сгруппированные |
+| `Blocked` / `StartBlocking` / `EndBlocking` / `DBServerName` / `DBBaseName` | `rac infobase info --cluster=<id> --infobase=<ib> --infobase-user=.. --infobase-pwd=..` → `sessions-deny` / `denied-from` / `denied-to` / `db-server` / `db-name` (требует прав на ИБ; здесь не включено, т.к. нужен пароль каждой базы) |
+
+## Что принципиально остаётся на стороне ОС/агента
+
+Этого нет в API администрирования кластера — собирайте штатными средствами
+Zabbix-агента (как в статье), RAS их не заменяет:
+
+| Метрика статьи | Ключ Zabbix |
+|---|---|
+| Статус службы агента 1С | `service_state["{$CLUSTER1C.SERVICE.NAME}"]` |
+| Запущен технологический журнал (`logcfg.xml`) | `vfs.dir.count["...1cv8",".*logcfg.xml$",,file]` |
+| Загрузка CPU по ядрам / общая | perfmon-счётчики `\238(N)\6` |
+| CPU% на процесс `rphost` | perfmon `\230(rphost_<PID>)\6` (при переходе на RAS уже не обязателен) |
+| Число ядер сервера | WMI `Win32_ComputerSystem` |
 
 ## Файлы
 
 | Файл | Назначение |
 |---|---|
-| `1c_cluster_ras.ps1` | Коллектор: `json` (мастер-айтем со всеми метриками), `discovery.ib`, `discovery.process`. |
-| `userparameter_1c_ras.conf` | UserParameter'ы Zabbix-агента: `onecras.json`, `onecras.discovery.ib`, `onecras.discovery.process`. |
+| `1c_cluster_ras.ps1` | Коллектор: `json` (мастер-айтем со всеми блоками), `discovery.ib` / `discovery.process` / `discovery.server`. |
+| `userparameter_1c_ras.conf` | UserParameter'ы Zabbix-агента: `onecras.json`, `onecras.discovery.*`. |
 
 ## Установка
 
-1. На хосте с доступом к RAS (сам сервер 1С или отдельная машина с `rac.exe`):
-   * скопировать `1c_cluster_ras.ps1` в `C:\Zabbix\Scripts\`;
-   * скопировать `userparameter_1c_ras.conf` в каталог конфигов агента.
-2. Убедиться, что RAS запущен (сервис `1C:Enterprise Remote Server`).
+1. Убедиться, что RAS запущен как сервис (порт 1545):
+   ```
+   "C:\Program Files\1cv8\<версия>\bin\ras.exe" cluster --service --port=1545 localhost:1540
+   ```
+2. Скопировать `1c_cluster_ras.ps1` в `C:\Zabbix\Scripts\`, а
+   `userparameter_1c_ras.conf` — в каталог конфигов агента.
 3. Поднять `Timeout` агента до ~30 c (опрос RAS не мгновенный).
-4. Проверить руками:
+4. Проверить вручную:
    ```
    powershell -NoProfile -ExecutionPolicy Bypass -File C:\Zabbix\Scripts\1c_cluster_ras.ps1 json
    ```
 
-## Схема мониторинга в Zabbix (рекомендуемая — «мастер-айтем»)
+## Схема мониторинга в Zabbix (мастер-айтем)
 
-Вместо десятков активных проверок (по одному запуску `rac` на метрику) — один
-опрос и зависимые элементы:
+Как и в статье — один опрос отдаёт весь JSON, метрики достаются предобработкой:
 
-1. **Мастер-айтем** `onecras.json` (тип: Zabbix agent, интервал 1–2 мин, тип
-   значения — Text).
+1. **Мастер-айтем** `onecras.json` (Zabbix agent, интервал 1–2 мин, тип Text).
 2. **Зависимые элементы** с предобработкой *JSONPath*:
-   * Сессий всего — `$.cluster.sessions`
-   * Соединений — `$.cluster.connections`
-   * Лицензий — `$.cluster.licenses`
-   * Блокировок — `$.cluster.locks`
-   * Процессов — `$.cluster.processes`
-3. **LLD инфобаз** — правило `onecras.discovery.ib`, прототип элемента
-   (тип: Dependent, мастер — `onecras.json`), JSONPath
-   `$.infobases[?(@.uuid=='{#IBUUID}')].sessions.first()`.
-4. **LLD процессов** — правило `onecras.discovery.process`, прототипы по
-   `$.processes[?(@.uuid=='{#PROCUUID}')].memory_size.first()` и т.п.
+   * `$.cluster.sessions_count`, `$.cluster.users_count`,
+     `$.cluster.prolicense_count`, `$.cluster.clients_count` и т.д.
+3. **LLD инфобаз** `onecras.discovery.ib`, прототип (Dependent):
+   `$.bases.list[?(@.BaseName=='{#IBNAME}')].sessions.first()`.
+4. **LLD процессов** `onecras.discovery.process`, прототипы по
+   `$.processes[?(@.PID=='{#PROCPID}')].MemorySize.first()` и т.п.
+5. **LLD серверов** `onecras.discovery.server`.
 
-Триггеры (пример): рост блокировок, память `rphost` выше порога, падение
-`available-perfomance`, недоступность RAS (nodata по мастер-айтему).
+Триггеры (примеры из статьи): превышение памяти `rphost`, рост числа
+регламентных `reg000` в рабочее время, срабатывание КОРП-лицензий (`prolicense`),
+недоступность RAS (nodata по мастер-айтему).
 
 ## Ограничения
 
-* `rac.exe` версии платформы должен быть совместим с версией сервера 1С.
-* `lock list` есть не во всех сборках — коллектор не падает, отдаёт `locks: 0`.
+* Версия `rac.exe` должна быть совместима с версией сервера 1С.
+* `-CorpLicensePattern` (регэксп short-presentation КОРП/базовых лицензий) стоит
+  сверить с фактическим выводом `rac license list` на вашей платформе.
 * Единицы `memory-size` зависят от версии платформы — сверяйтесь с консолью
   администрирования при настройке порогов.
+* Параметры блокировки ИБ и имя БД (`infobase info`) требуют прав на каждую
+  информационную базу — в коллектор не включены намеренно.
+* Скрипт вычитан статически; на реальном кластере проверьте имена полей `rac`
+  (в разных сборках платформы встречаются отличия).

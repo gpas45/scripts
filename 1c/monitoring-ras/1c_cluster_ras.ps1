@@ -39,14 +39,12 @@
     (как в статье: КОРП 500 и базовые). Проверьте формат на своей платформе.
 
 .NOTES
-    Кроссплатформенный: Windows PowerShell 5.1 (powershell) или PowerShell 7+
-    (pwsh) на Linux. Путь и имя rac (rac.exe / rac) определяются автоматически.
+    Версия для Windows (Windows PowerShell 5.1+). rac.exe ищется автоматически.
+    Для Linux — отдельный 1c_cluster_ras.sh (bash/awk, без PowerShell).
 
 .EXAMPLE
-    # Windows
     powershell -NoProfile -ExecutionPolicy Bypass -File 1c_cluster_ras.ps1 json
-    # Linux
-    pwsh -NoProfile -File ./1c_cluster_ras.ps1 json -RasServer 1c-srv:1545
+    powershell -NoProfile -ExecutionPolicy Bypass -File 1c_cluster_ras.ps1 discovery.ib
 #>
 [CmdletBinding()]
 param(

@@ -102,25 +102,30 @@ Zabbix-агента (как в статье), RAS их не заменяет:
 
 ## Файлы
 
+Две отдельные реализации коллектора под каждую ОС; **обе выдают идентичный JSON**,
+поэтому Zabbix-шаблон и ключи (`onecras.*`) для них общие.
+
 | Файл | Назначение |
 |---|---|
-| `1c_cluster_ras.ps1` | Кроссплатформенный коллектор: `json` (мастер-айтем со всеми блоками), `discovery.ib` / `discovery.process` / `discovery.server`. |
-| `userparameter_1c_ras.conf` | UserParameter'ы Zabbix-агента для **Windows** (`powershell`). |
-| `userparameter_1c_ras_linux.conf` | UserParameter'ы для **Linux** (`pwsh`). |
+| `1c_cluster_ras.ps1` | Коллектор для **Windows** (Windows PowerShell 5.1+). |
+| `1c_cluster_ras.sh` | Коллектор для **Linux** (bash + awk, **без PowerShell**). |
+| `userparameter_1c_ras.conf` | UserParameter'ы Zabbix-агента для Windows (`powershell`). |
+| `userparameter_1c_ras_linux.conf` | UserParameter'ы для Linux (вызывают `.sh`). |
 | `template_1c_cluster_ras.yaml` | Импортируемый шаблон Zabbix 6.0: мастер-айтем, зависимые элементы, 3 LLD, триггеры. |
 
-## Кроссплатформенность
+Оба коллектора принимают одинаковые режимы (`json`, `discovery.ib`,
+`discovery.process`, `discovery.server`) и сами находят `rac`/`rac.exe` (PATH и
+типовые каталоги установки); путь переопределяется — на Windows параметром
+`-RacPath`, на Linux переменной `RAC_PATH`.
 
-Скрипт — один и тот же для Windows и Linux:
+### Зависимости Linux-версии
 
-* **Windows** — Windows PowerShell 5.1 (`powershell`), rac ищется в
-  `%ProgramFiles%\1cv8`;
-* **Linux** — PowerShell 7+ (`pwsh`, напр. `apt install powershell`), rac ищется
-  в `PATH`, затем в `/opt/1cv8`, `/opt/1C`, `/usr/local/1cv8`, `/usr/lib/1cv8`.
+Сознательно минимальные — PowerShell на серверах 1С из коробки нет:
 
-Путь и имя (`rac.exe` / `rac`) определяются автоматически; переопределяются
-параметром `-RacPath`. Логика разбора и JSON — чистый PowerShell, одинаковый на
-обеих ОС.
+* `rac` — из состава платформы 1С (`/opt/1cv8/.../rac`);
+* `awk` (`mawk`/`gawk`), `bash`, `find`, `sort`, `head` — есть в любом дистрибутиве.
+
+Никаких `jq`, `python`, `pwsh` — разбор вывода `rac` и сборка JSON целиком на awk.
 
 ## Установка
 
@@ -139,13 +144,12 @@ Zabbix-агента (как в статье), RAS их не заменяет:
 
 ### Linux
 
-1. Убедиться, что RAS запущен (обычно systemd-юнит `srv1cv8-ras`, порт 1545),
-   и установлен `pwsh`.
-2. Скопировать `1c_cluster_ras.ps1` в `/etc/zabbix/scripts/`, а
+1. Убедиться, что RAS запущен (обычно systemd-юнит `srv1cv8-ras`, порт 1545).
+2. Скопировать `1c_cluster_ras.sh` в `/etc/zabbix/scripts/` (`chmod +x`), а
    `userparameter_1c_ras_linux.conf` — в `/etc/zabbix/zabbix_agentd.d/`.
 3. Поднять `Timeout` агента до ~30 c. Проверить:
    ```
-   pwsh -NoProfile -File /etc/zabbix/scripts/1c_cluster_ras.ps1 json
+   /etc/zabbix/scripts/1c_cluster_ras.sh json 1c-srv:1545
    ```
 
 4. Импортировать `template_1c_cluster_ras.yaml` в Zabbix и привязать к хосту
@@ -178,12 +182,15 @@ Zabbix-агента (как в статье), RAS их не заменяет:
 
 ## Ограничения
 
-* Версия `rac.exe` должна быть совместима с версией сервера 1С.
-* `-CorpLicensePattern` (регэксп short-presentation КОРП/базовых лицензий) стоит
-  сверить с фактическим выводом `rac license list` на вашей платформе.
+* Версия `rac`/`rac.exe` должна быть совместима с версией сервера 1С.
+* Фильтр КОРП/базовых лицензий (Windows — `-CorpLicensePattern`, Linux —
+  переменная `CORP_LICENSE_PATTERN`) стоит сверить с фактическим выводом
+  `rac license list`. На Linux дефолт без интервалов `{3}` (`ORG8B ... 500`) —
+  совместим с `mawk`; при использовании интервалов нужен `gawk`.
 * Единицы `memory-size` зависят от версии платформы — сверяйтесь с консолью
   администрирования при настройке порогов.
 * Параметры блокировки ИБ и имя БД (`infobase info`) требуют прав на каждую
   информационную базу — в коллектор не включены намеренно.
-* Скрипт вычитан статически; на реальном кластере проверьте имена полей `rac`
-  (в разных сборках платформы встречаются отличия).
+* Linux-версия (`.sh`) протестирована на синтетическом выводе `rac` (парсинг и
+  JSON валидны); Windows-версия (`.ps1`) вычитана статически. На реальном
+  кластере сверьте имена полей `rac` — в разных сборках платформы есть отличия.

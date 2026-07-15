@@ -68,6 +68,22 @@ json_escape() {
   printf '%s' "$s"
 }
 
+# Гарантирует существование каталога для файловых копий.
+# Если каталог отсутствует — создаёт его и выдаёт права postgres:postgres.
+ensure_backup_dir() {
+  local dir="$1"
+  if [[ -d "$dir" ]]; then
+    echo "INFO: каталог для копий уже существует: ${dir}"
+    return 0
+  fi
+  echo "INFO: каталог для копий не обнаружен, создаю: ${dir}"
+  if ! install -d -o "$PG_SUPERUSER" -g "$PG_SUPERUSER" -m 700 "$dir"; then
+    echo "ERROR: не удалось создать каталог ${dir}" >&2
+    return 1
+  fi
+  echo "OK: создан каталог ${dir} (владелец ${PG_SUPERUSER}:${PG_SUPERUSER})"
+}
+
 # Жив ли кластер на порту (по unix-сокету).
 pg_alive() {
   local port="$1" timeout="${2:-3}"
@@ -481,6 +497,11 @@ else
   WALG_FILE_PREFIX_BASE="$(prompt_default 'Базовый каталог WALG_FILE_PREFIX' '/backup')"
   WALG_FILE_PREFIX_BASE="${WALG_FILE_PREFIX_BASE%/}"
   J_WALG_FILE_PREFIX_BASE="$(json_escape "$WALG_FILE_PREFIX_BASE")"
+
+  # Проверяем/создаём базовый каталог для файловых копий (права postgres:postgres).
+  if ! ensure_backup_dir "$WALG_FILE_PREFIX_BASE"; then
+    exit 1
+  fi
 fi
 
 # =============================================================================
@@ -529,6 +550,14 @@ for PGPORT in "${SELECTED_PORTS[@]}"; do
   fi
 
   echo "INFO: PGDATA = ${PGDATA}"
+
+  # --- Для файлового варианта гарантируем каталог назначения текущего кластера ---
+  if [[ "$BACKEND" == "file" ]]; then
+    if ! ensure_backup_dir "${WALG_FILE_PREFIX_BASE}/${PGPORT}"; then
+      echo "WARN: пропуск порта ${PGPORT}: нет каталога для копий" >&2
+      continue
+    fi
+  fi
 
   # --- Решаем, нужно ли (пере)записывать конфиг ---
   WRITE_CFG=1

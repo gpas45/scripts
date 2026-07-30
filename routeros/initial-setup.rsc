@@ -6,7 +6,7 @@
 #   2. Assign real interfaces to the LAN / WAN / StS / VPN lists in the
 #      "/interface list member" section.
 #   3. Upload to the router and run:  /import file-name=initial-setup.rsc
-#
+#   4. 
 # Notes:
 #   StS = Site-to-Site tunnels, VPN = remote-access VPN clients.
 #   Port knocking sequence: 1234 -> 2345 -> 3456, then connect to 12345.
@@ -35,7 +35,7 @@ add name=VPN comment="Remote-access VPN clients"
 
 /interface list member
 # Assign your real interfaces here, examples below:
-add list=WAN interface=ether1
+# add list=WAN interface=ether1
 add list=LAN interface=bridge
 # add list=StS interface=<gre-tunnel1>
 # add list=VPN interface=<wireguard1>
@@ -103,7 +103,7 @@ set telnet disabled=yes
 set ftp disabled=yes
 set www disabled=yes
 set api disabled=yes
-set api-ssl disabled=yes
+set api-ssl disabled=no
 /ip neighbor discovery-settings
 set discover-interface-list=LAN
 # MAC-server is left enabled on all interfaces so the router stays reachable
@@ -111,11 +111,11 @@ set discover-interface-list=LAN
 # an IP address. NOTE: this also exposes MAC access on WAN — restrict to a
 # management interface list once setup is complete.
 /tool mac-server
-set allowed-interface-list=all
+set allowed-interface-list=LAN
 /tool mac-server mac-winbox
-set allowed-interface-list=all
+set allowed-interface-list=LAN
 /tool mac-server ping
-set enabled=yes
+set enabled=no
 # Disable the bandwidth-test server (open by default, common attack vector).
 /tool bandwidth-server
 set enabled=no
@@ -129,8 +129,14 @@ set disable-ipv6=yes
 set time-zone-name=Asia/Yekaterinburg
 /system ntp client
 set enabled=yes
-/system ntp client servers
-add address=pool.ntp.org
+
+# Для ROS7
+/system ntp client
+set enabled=yes servers=pool.ntp.org
+
+# Для ROS6
+/system ntp client
+set enabled=yes server-dns-names=pool.ntp.org
 
 # Act as an NTP server for downstream clients.
 /system ntp server
@@ -140,7 +146,13 @@ set enabled=yes
 # Logging — suppress info-level messages for DHCP and Wireless
 # ---------------------------------------------------------------------------
 /system logging
-set [find where topics="info"] topics=info,!dhcp,!wireless,!wifi
+set [find where topics="info"] topics=info,!dhcp
+
+# для ROS6 или ROS7 c WiFi (пакет wireless)
+set [find where topics="info"] topics=info,!dhcp,!wireless
+
+# Для ROS7 с WiFI (пакет wifi)
+set [find where topics="info"] topics=info,!dhcp,!wifi
 
 # ---------------------------------------------------------------------------
 # RouterOS package update channel — use the long-term (stable) release branch

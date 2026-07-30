@@ -119,6 +119,8 @@ set enabled=no
 # Disable the bandwidth-test server (open by default, common attack vector).
 /tool bandwidth-server
 set enabled=no
+
+# Для ROS7
 /ipv6 settings
 set disable-ipv6=yes
 

@@ -1,39 +1,39 @@
-# RouterOS 6 initial setup script
-# Based on routeros/autorun.scr, extended with interface lists and firewall rules.
-# For RouterOS 7 use initial-setup-ros7.rsc instead (different NTP / IPv6 /
-# routing-filter / logging syntax).
+# Скрипт первичной настройки RouterOS 6
+# На основе routeros/autorun.scr, расширен списками интерфейсов и правилами firewall.
+# Для RouterOS 7 используйте initial-setup-ros7.rsc (отличается синтаксис NTP /
+# IPv6 / фильтров маршрутов / топиков логирования).
 #
-# Usage:
-#   1. Review and adjust the placeholders marked CHANGE_ME / <...> below.
-#   2. Assign real interfaces to the LAN / WAN / StS / VPN lists in the
-#      "/interface list member" section.
-#   3. Upload to the router and run:  /import file-name=initial-setup-ros6.rsc
-#   4. The "drop all other" filter rules intentionally use action=passthrough:
-#      during initial setup nothing is actually dropped, only logged, so you
-#      cannot lock yourself out. After reviewing the logs and confirming you
-#      will not be locked out, switch these rules (in the input and forward
-#      chains) to action=drop.
+# Использование:
+#   1. Просмотрите и поправьте плейсхолдеры CHANGE_ME / <...> ниже.
+#   2. Назначьте реальные интерфейсы спискам LAN / WAN / StS / VPN в
+#      секции "/interface list member".
+#   3. Загрузите на роутер и выполните:  /import file-name=initial-setup-ros6.rsc
+#   4. Правила firewall "drop all other" намеренно используют action=passthrough:
+#      на этапе первичной настройки трафик НЕ отбрасывается, а только логируется,
+#      чтобы не потерять доступ к роутеру. После проверки логов и уверенности,
+#      что вы себя не заблокируете, смените эти правила (в цепочках input и
+#      forward) на action=drop.
 #
-# Notes:
-#   StS = Site-to-Site tunnels, VPN = remote-access VPN clients.
-#   Port knocking sequence: 1234 -> 2345 -> 3456, then connect to 12345.
-#   Requires RouterOS 6.41+ (interface lists / in-interface-list).
+# Примечания:
+#   StS = туннели site-to-site, VPN = удалённые VPN-клиенты.
+#   Последовательность port knocking: 1234 -> 2345 -> 3456, затем подключение к 12345.
+#   Требуется RouterOS 6.41+ (списки интерфейсов / in-interface-list).
 
-# Per-provider settings (addresses, routes, dhcp-client, user passwords)
-# are intentionally NOT included here — configure them separately for each
-# uplink / deployment.
+# Настройки, зависящие от провайдера (адреса, маршруты, dhcp-клиент, пароли
+# пользователей) намеренно НЕ включены — настраивайте их отдельно для каждого
+# аплинка / развёртывания.
 
 # ---------------------------------------------------------------------------
-# Bridge
+# Мост (bridge)
 # ---------------------------------------------------------------------------
 /interface bridge
 add name=bridge comment="Local bridge"
-# Ports are intentionally not bound here — add them per deployment, e.g.:
+# Порты намеренно не привязаны здесь — добавляйте их под каждое развёртывание, напр.:
 # /interface bridge port
 # add bridge=bridge interface=ether2
 
 # ---------------------------------------------------------------------------
-# Interface lists
+# Списки интерфейсов
 # ---------------------------------------------------------------------------
 /interface list
 add name=WAN comment="Uplinks / Internet-facing interfaces"
@@ -42,8 +42,8 @@ add name=StS comment="Site-to-Site tunnels"
 add name=VPN comment="Remote-access VPN clients"
 
 /interface list member
-# Assign your real interfaces here, examples below:
-add list=WAN interface=ether1
+# Назначьте здесь свои реальные интерфейсы, примеры ниже:
+# add list=WAN interface=ether1
 add list=LAN interface=bridge
 # add list=StS interface=<gre-tunnel1>
 # add list=VPN interface=<wireguard1>
@@ -64,6 +64,13 @@ add action=accept chain=input comment="accept management" connection-state=new d
 add action=accept chain=input comment="accept LAN" in-interface-list=LAN
 add action=accept chain=input comment="accept StS" in-interface-list=StS
 add action=accept chain=input comment="accept VPN" in-interface-list=VPN
+# VPN / туннельные протоколы (GRE / L2TP / IPsec): правила выключены (disabled=yes),
+# включите нужные (disabled=no) при терминировании туннелей на роутере.
+add action=accept chain=input comment="accept IPsec IKE (500,4500)" disabled=yes dst-port=500,4500 in-interface-list=WAN protocol=udp
+add action=accept chain=input comment="accept IPsec ESP" disabled=yes in-interface-list=WAN protocol=ipsec-esp
+add action=accept chain=input comment="accept IPsec AH" disabled=yes in-interface-list=WAN protocol=ipsec-ah
+add action=accept chain=input comment="accept L2TP (1701)" disabled=yes dst-port=1701 in-interface-list=WAN protocol=udp
+add action=accept chain=input comment="accept GRE" disabled=yes in-interface-list=WAN protocol=gre
 add action=passthrough chain=input comment="drop all other (see usage note 4: passthrough)" log-prefix="IN DROP"
 add action=accept chain=forward comment="accept established, related connections" connection-state=established,related
 add action=drop chain=forward comment="drop invalid connections" connection-state=invalid log-prefix="INV FWD"
@@ -96,79 +103,78 @@ add action=drop chain=detect-intrusion src-address-list="black-list attackers"
 add action=masquerade chain=srcnat comment="LAN -> Internet" out-interface-list=WAN
 
 # ---------------------------------------------------------------------------
-# DNS — resolver for LAN / VPN / StS clients
+# DNS — резолвер для клиентов LAN / VPN / StS
 # ---------------------------------------------------------------------------
 /ip dns
 set allow-remote-requests=yes servers=1.1.1.1,8.8.8.8
-# DNS queries are accepted from LAN / VPN / StS by the input chain rules above
-# and dropped from WAN by default.
+# DNS-запросы принимаются от LAN / VPN / StS правилами цепочки input выше
+# и по умолчанию отбрасываются со стороны WAN.
 
 # ---------------------------------------------------------------------------
-# Service / management hardening
+# Сервисы / усиление безопасности управления
 # ---------------------------------------------------------------------------
 /ip service
 set telnet disabled=yes
 set ftp disabled=yes
 set www disabled=yes
 set api disabled=yes
-set api-ssl disabled=yes
+set api-ssl disabled=no
 /ip neighbor discovery-settings
 set discover-interface-list=LAN
-# MAC-server is left enabled on all interfaces so the router stays reachable
-# via MAC-telnet / MAC-winbox during initial setup from any port, before it has
-# an IP address. NOTE: this also exposes MAC access on WAN — restrict to a
-# management interface list once setup is complete.
+# MAC-сервер ограничен списком LAN: MAC-telnet / MAC-winbox доступны только
+# из локальной сети и недоступны со стороны WAN.
 /tool mac-server
-set allowed-interface-list=all
+set allowed-interface-list=LAN
 /tool mac-server mac-winbox
-set allowed-interface-list=all
+set allowed-interface-list=LAN
 /tool mac-server ping
-set enabled=yes
-# Disable the bandwidth-test server (open by default, common attack vector).
+set enabled=no
+# Отключаем сервер bandwidth-test (по умолчанию открыт, частый вектор атаки).
 /tool bandwidth-server
 set enabled=no
 
 # ---------------------------------------------------------------------------
-# Disable unused packages (RouterOS 6 only)
-# Turns off the hotspot, ipv6 and mpls packages. Takes effect after a reboot.
-# Disabling the ipv6 package is how IPv6 is fully turned off on RouterOS 6
-# (there is no monolithic-package "/ipv6 settings set disable-ipv6" toggle).
+# Отключение неиспользуемых пакетов (только RouterOS 6)
+# Отключает пакеты hotspot, ipv6 и mpls. Изменения применяются после
+# перезагрузки роутера. Отключение пакета ipv6 — это способ полностью
+# выключить IPv6 в RouterOS 6 (в ней нет настройки "/ipv6 settings
+# set disable-ipv6" монолитного пакета).
 # ---------------------------------------------------------------------------
 /system package disable hotspot,ipv6,mpls
 
 # ---------------------------------------------------------------------------
-# Time / NTP
+# Время / NTP
 # ---------------------------------------------------------------------------
 /system clock
 set time-zone-name=Asia/Yekaterinburg
-# RouterOS 6: NTP client uses server-dns-names / primary-ntp (no "servers").
+# RouterOS 6: NTP-клиент использует server-dns-names / primary-ntp (без "servers").
 /system ntp client
 set enabled=yes server-dns-names=pool.ntp.org
 
-# Act as an NTP server for downstream clients.
-# NOTE: on RouterOS 6 the NTP server lives in the separate "ntp" package —
-# this block only works if that package is installed.
+# Работать как NTP-сервер для нижестоящих клиентов.
+# ПРИМЕЧАНИЕ: в RouterOS 6 NTP-сервер входит в отдельный пакет "ntp" —
+# этот блок работает только если пакет установлен.
 /system ntp server
 set enabled=yes
 
 # ---------------------------------------------------------------------------
-# Logging — suppress info-level messages for DHCP and Wireless
+# Логирование — подавить info-сообщения для DHCP и беспроводной сети
 # ---------------------------------------------------------------------------
-# RouterOS 6 has no "wifi" topic; use "wireless". If this device has no
-# wireless package at all, drop !wireless and keep only info,!dhcp.
+# В RouterOS 6 нет топика "wifi"; используйте "wireless". Если на устройстве
+# вообще нет беспроводного пакета — уберите !wireless, оставив только info,!dhcp.
 /system logging
 set [find where topics="info"] topics=info,!dhcp,!wireless
 
 # ---------------------------------------------------------------------------
-# RouterOS package update channel — use the long-term (stable) release branch
+# Канал обновления пакетов RouterOS — использовать ветку long-term (стабильную)
 # ---------------------------------------------------------------------------
 /system package update
 set channel=long-term
 
 # ---------------------------------------------------------------------------
-# RouterBOARD firmware auto-upgrade
-# Upgrades the RouterBOARD firmware on startup when a newer one is available,
-# then reboots to apply it.
+# Авто-обновление прошивки RouterBOARD
+# Обновляет прошивку RouterBOARD при старте, если доступна более новая,
+# затем перезагружается для её применения.
 # ---------------------------------------------------------------------------
 /system scheduler
 add name=routerboard_fwupgrade policy=reboot,read,write,sensitive start-time=startup \
@@ -179,8 +185,8 @@ add name=routerboard_fwupgrade policy=reboot,read,write,sensitive start-time=sta
     \n}"
 
 # ---------------------------------------------------------------------------
-# OSPF routing filters — accept only local (RFC1918) prefixes in/out
-# RouterOS 6 routing-filter syntax (prefix / prefix-length / action).
+# Фильтры маршрутизации OSPF — принимать только локальные (RFC1918) префиксы вх/исх
+# Синтаксис фильтров маршрутов RouterOS 6 (prefix / prefix-length / action).
 # ---------------------------------------------------------------------------
 /routing filter
 add chain=ospf-in prefix=192.168.0.0/16 prefix-length=16-32 action=accept

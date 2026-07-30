@@ -52,6 +52,10 @@ add list=LAN interface=bridge
 # Firewall filter
 # ---------------------------------------------------------------------------
 /ip firewall filter
+# GRE должен стоять ПЕРЕД правилом drop invalid: у GRE нет отслеживания
+# соединений, его пакеты помечаются как invalid и иначе будут отброшены.
+# Правило выключено (disabled=yes) — включите (disabled=no) при использовании GRE.
+add action=accept chain=input comment="accept GRE" disabled=yes in-interface-list=WAN protocol=gre
 add action=accept chain=input comment="accept established, related connections" connection-state=established,related
 add action=drop chain=input comment="drop invalid connections" connection-state=invalid log-prefix="DROP INPUT INVALID:"
 add action=jump chain=input comment="jump for icmp input flow" jump-target=icmp protocol=icmp
@@ -64,13 +68,13 @@ add action=accept chain=input comment="accept management" connection-state=new d
 add action=accept chain=input comment="accept LAN" in-interface-list=LAN
 add action=accept chain=input comment="accept StS" in-interface-list=StS
 add action=accept chain=input comment="accept VPN" in-interface-list=VPN
-# VPN / туннельные протоколы (GRE / L2TP / IPsec): правила выключены (disabled=yes),
+# VPN / туннельные протоколы (L2TP / IPsec): правила выключены (disabled=yes),
 # включите нужные (disabled=no) при терминировании туннелей на роутере.
+# (GRE вынесен в начало цепочки — см. выше, до правила drop invalid.)
 add action=accept chain=input comment="accept IPsec IKE (500,4500)" disabled=yes dst-port=500,4500 in-interface-list=WAN protocol=udp
 add action=accept chain=input comment="accept IPsec ESP" disabled=yes in-interface-list=WAN protocol=ipsec-esp
 add action=accept chain=input comment="accept IPsec AH" disabled=yes in-interface-list=WAN protocol=ipsec-ah
 add action=accept chain=input comment="accept L2TP (1701)" disabled=yes dst-port=1701 in-interface-list=WAN protocol=udp
-add action=accept chain=input comment="accept GRE" disabled=yes in-interface-list=WAN protocol=gre
 add action=passthrough chain=input comment="drop all other (see usage note 4: passthrough)" log-prefix="IN DROP"
 add action=accept chain=forward comment="accept established, related connections" connection-state=established,related
 add action=drop chain=forward comment="drop invalid connections" connection-state=invalid log-prefix="INV FWD"
@@ -101,6 +105,11 @@ add action=drop chain=detect-intrusion src-address-list="black-list attackers"
 # ---------------------------------------------------------------------------
 /ip firewall nat
 add action=masquerade chain=srcnat comment="LAN -> Internet" out-interface-list=WAN
+# Если внешний адрес статический, предпочтительнее src-nat вместо masquerade:
+# он не пересчитывает адрес на каждый пакет и не сбрасывает соединения при
+# смене состояния интерфейса. Отключите правило masquerade выше и включите это,
+# подставив свой публичный адрес:
+# add action=src-nat chain=srcnat comment="LAN -> Internet (static)" out-interface-list=WAN to-addresses=203.0.113.1
 
 # ---------------------------------------------------------------------------
 # DNS — резолвер для клиентов LAN / VPN / StS
@@ -160,10 +169,13 @@ set enabled=yes
 # ---------------------------------------------------------------------------
 # Логирование — подавить info-сообщения для DHCP и беспроводной сети
 # ---------------------------------------------------------------------------
-# В RouterOS 6 нет топика "wifi"; используйте "wireless". Если на устройстве
-# вообще нет беспроводного пакета — уберите !wireless, оставив только info,!dhcp.
+# Подавляем info-сообщения DHCP.
 /system logging
-set [find where topics="info"] topics=info,!dhcp,!wireless
+set [find where topics="info"] topics=info,!dhcp
+# Пример: чтобы дополнительно подавить и беспроводные сообщения, добавьте топик
+# "wireless" (в RouterOS 6 топика "wifi" нет). Работает только если установлен
+# пакет wireless. Раскомментируйте при необходимости:
+# set [find where topics="info"] topics=info,!dhcp,!wireless
 
 # ---------------------------------------------------------------------------
 # Канал обновления пакетов RouterOS — использовать ветку long-term (стабильную)

@@ -1,0 +1,447 @@
+zabbix_export:
+  version: '6.0'
+  date: '2026-07-12T00:00:00Z'
+  groups:
+    -
+      uuid: 7df96b18c230490a9a0a9e2307226338
+      name: Templates
+  templates:
+    -
+      uuid: a1b2c3d4e5f640718293a4b5c6d7e8f9
+      template: '1C cluster by RAS'
+      name: '1C cluster by RAS'
+      description: |
+        Мониторинг кластера 1С 8.3 через RAS/RAC (rac.exe/rac).
+        Порт статьи https://infostart.ru/1c/articles/1632627/ с COM+ на RAS/RAC.
+
+        Требуются на хосте с доступом к RAS (TCP 1545):
+          Windows: скрипт 1c_cluster_ras.ps1 + userparameter_1c_ras.conf
+          Linux:   скрипт 1c_cluster_ras.ps1 + userparameter_1c_ras_linux.conf (нужен pwsh)
+
+        Один мастер-айтем onecras.json опрашивает RAS, остальные метрики —
+        зависимые элементы с предобработкой JSONPath.
+      groups:
+        -
+          name: Templates
+      macros:
+        -
+          macro: '{$RAS.SERVER}'
+          value: 'localhost:1545'
+          description: 'Адрес RAS в виде host:port'
+        -
+          macro: '{$RAS.CLUSTER.USER}'
+          value: ''
+          description: 'Администратор кластера (если задан)'
+        -
+          macro: '{$RAS.CLUSTER.PWD}'
+          value: ''
+          description: 'Пароль администратора кластера'
+        -
+          macro: '{$RPHOST.MEM.WARN}'
+          value: '8000000'
+          description: 'Порог памяти рабочего процесса rphost (единицы memory-size платформы)'
+        -
+          macro: '{$PROLICENSE.MAX}'
+          value: '10'
+          description: 'Порог числа ПРОФ-лицензий на КОРП-кластере (см. статью)'
+      items:
+        -
+          uuid: b0010000000000000000000000000001
+          name: '1С RAS: сбор данных кластера (JSON)'
+          type: ZABBIX_ACTIVE
+          key: 'onecras.json["{$RAS.SERVER}","{$RAS.CLUSTER.USER}","{$RAS.CLUSTER.PWD}"]'
+          delay: '1m'
+          history: '0'
+          trends: '0'
+          value_type: TEXT
+          description: 'Мастер-айтем: весь кластер одним опросом RAS.'
+          tags:
+            -
+              tag: Application
+              value: '1С Кластер'
+          triggers:
+            -
+              uuid: c0010000000000000000000000000001
+              expression: 'nodata(/1C cluster by RAS/onecras.json["{$RAS.SERVER}","{$RAS.CLUSTER.USER}","{$RAS.CLUSTER.PWD}"],5m)=1'
+              name: 'RAS недоступен на {HOST.NAME}'
+              priority: HIGH
+        -
+          uuid: b0010000000000000000000000000002
+          name: '1С Кластер: сессий всего'
+          type: DEPENDENT
+          key: onecras.cluster.sessions_count
+          delay: '0'
+          value_type: UNSIGNED
+          master_item:
+            key: 'onecras.json["{$RAS.SERVER}","{$RAS.CLUSTER.USER}","{$RAS.CLUSTER.PWD}"]'
+          preprocessing:
+            -
+              type: JSONPATH
+              parameters:
+                - $.cluster.sessions_count
+          tags:
+            -
+              tag: Application
+              value: '1С Кластер'
+        -
+          uuid: b0010000000000000000000000000003
+          name: '1С Кластер: соединений'
+          type: DEPENDENT
+          key: onecras.cluster.connections_count
+          delay: '0'
+          value_type: UNSIGNED
+          master_item:
+            key: 'onecras.json["{$RAS.SERVER}","{$RAS.CLUSTER.USER}","{$RAS.CLUSTER.PWD}"]'
+          preprocessing:
+            -
+              type: JSONPATH
+              parameters:
+                - $.cluster.connections_count
+          tags:
+            -
+              tag: Application
+              value: '1С Кластер'
+        -
+          uuid: b0010000000000000000000000000004
+          name: '1С Кластер: пользователей (лицензий)'
+          type: DEPENDENT
+          key: onecras.cluster.users_count
+          delay: '0'
+          value_type: UNSIGNED
+          master_item:
+            key: 'onecras.json["{$RAS.SERVER}","{$RAS.CLUSTER.USER}","{$RAS.CLUSTER.PWD}"]'
+          preprocessing:
+            -
+              type: JSONPATH
+              parameters:
+                - $.cluster.users_count
+          tags:
+            -
+              tag: Application
+              value: '1С Кластер'
+        -
+          uuid: b0010000000000000000000000000005
+          name: '1С Кластер: клиентов (1CV8/1CV8C)'
+          type: DEPENDENT
+          key: onecras.cluster.clients_count
+          delay: '0'
+          value_type: UNSIGNED
+          master_item:
+            key: 'onecras.json["{$RAS.SERVER}","{$RAS.CLUSTER.USER}","{$RAS.CLUSTER.PWD}"]'
+          preprocessing:
+            -
+              type: JSONPATH
+              parameters:
+                - $.cluster.clients_count
+          tags:
+            -
+              tag: Application
+              value: '1С Кластер'
+        -
+          uuid: b0010000000000000000000000000006
+          name: '1С Кластер: WEB-сервисов'
+          type: DEPENDENT
+          key: onecras.cluster.ws_count
+          delay: '0'
+          value_type: UNSIGNED
+          master_item:
+            key: 'onecras.json["{$RAS.SERVER}","{$RAS.CLUSTER.USER}","{$RAS.CLUSTER.PWD}"]'
+          preprocessing:
+            -
+              type: JSONPATH
+              parameters:
+                - $.cluster.ws_count
+          tags:
+            -
+              tag: Application
+              value: '1С Кластер'
+        -
+          uuid: b0010000000000000000000000000007
+          name: '1С Кластер: HTTP-сервисов'
+          type: DEPENDENT
+          key: onecras.cluster.http_count
+          delay: '0'
+          value_type: UNSIGNED
+          master_item:
+            key: 'onecras.json["{$RAS.SERVER}","{$RAS.CLUSTER.USER}","{$RAS.CLUSTER.PWD}"]'
+          preprocessing:
+            -
+              type: JSONPATH
+              parameters:
+                - $.cluster.http_count
+          tags:
+            -
+              tag: Application
+              value: '1С Кластер'
+        -
+          uuid: b0010000000000000000000000000008
+          name: '1С Кластер: фоновых заданий'
+          type: DEPENDENT
+          key: onecras.cluster.jobs_count
+          delay: '0'
+          value_type: UNSIGNED
+          master_item:
+            key: 'onecras.json["{$RAS.SERVER}","{$RAS.CLUSTER.USER}","{$RAS.CLUSTER.PWD}"]'
+          preprocessing:
+            -
+              type: JSONPATH
+              parameters:
+                - $.cluster.jobs_count
+          tags:
+            -
+              tag: Application
+              value: '1С Кластер'
+        -
+          uuid: b0010000000000000000000000000009
+          name: '1С Кластер: COM+ подключений'
+          type: DEPENDENT
+          key: onecras.cluster.com_count
+          delay: '0'
+          value_type: UNSIGNED
+          master_item:
+            key: 'onecras.json["{$RAS.SERVER}","{$RAS.CLUSTER.USER}","{$RAS.CLUSTER.PWD}"]'
+          preprocessing:
+            -
+              type: JSONPATH
+              parameters:
+                - $.cluster.com_count
+          tags:
+            -
+              tag: Application
+              value: '1С Кластер'
+        -
+          uuid: b001000000000000000000000000000a
+          name: '1С Кластер: веб-клиентов'
+          type: DEPENDENT
+          key: onecras.cluster.web_count
+          delay: '0'
+          value_type: UNSIGNED
+          master_item:
+            key: 'onecras.json["{$RAS.SERVER}","{$RAS.CLUSTER.USER}","{$RAS.CLUSTER.PWD}"]'
+          preprocessing:
+            -
+              type: JSONPATH
+              parameters:
+                - $.cluster.web_count
+          tags:
+            -
+              tag: Application
+              value: '1С Кластер'
+        -
+          uuid: b001000000000000000000000000000b
+          name: '1С Кластер: рабочих серверов'
+          type: DEPENDENT
+          key: onecras.cluster.workingservers_count
+          delay: '0'
+          value_type: UNSIGNED
+          master_item:
+            key: 'onecras.json["{$RAS.SERVER}","{$RAS.CLUSTER.USER}","{$RAS.CLUSTER.PWD}"]'
+          preprocessing:
+            -
+              type: JSONPATH
+              parameters:
+                - $.cluster.workingservers_count
+          tags:
+            -
+              tag: Application
+              value: '1С Кластер'
+        -
+          uuid: b001000000000000000000000000000c
+          name: '1С Кластер: лицензий ПРОФ'
+          type: DEPENDENT
+          key: onecras.cluster.prolicense_count
+          delay: '0'
+          value_type: UNSIGNED
+          master_item:
+            key: 'onecras.json["{$RAS.SERVER}","{$RAS.CLUSTER.USER}","{$RAS.CLUSTER.PWD}"]'
+          preprocessing:
+            -
+              type: JSONPATH
+              parameters:
+                - $.cluster.prolicense_count
+          tags:
+            -
+              tag: Application
+              value: '1С Кластер'
+          triggers:
+            -
+              uuid: c001000000000000000000000000000c
+              expression: 'last(/1C cluster by RAS/onecras.cluster.prolicense_count)>{$PROLICENSE.MAX}'
+              name: 'Слишком много ПРОФ-лицензий на КОРП-кластере {HOST.NAME}'
+              priority: WARNING
+              description: 'Из статьи: подключение >10 ПРОФ-ключей ломает функционал КОРП.'
+        -
+          uuid: b001000000000000000000000000000d
+          name: '1С Кластер: допустимый объём памяти'
+          type: DEPENDENT
+          key: onecras.cluster.max_memory_size
+          delay: '0'
+          value_type: UNSIGNED
+          master_item:
+            key: 'onecras.json["{$RAS.SERVER}","{$RAS.CLUSTER.USER}","{$RAS.CLUSTER.PWD}"]'
+          preprocessing:
+            -
+              type: JSONPATH
+              parameters:
+                - $.cluster.MaxMemorySize
+          tags:
+            -
+              tag: Application
+              value: '1С Кластер'
+      discovery_rules:
+        -
+          uuid: d0010000000000000000000000000001
+          name: 'Обнаружение информационных баз'
+          type: ZABBIX_ACTIVE
+          key: 'onecras.discovery.ib["{$RAS.SERVER}","{$RAS.CLUSTER.USER}","{$RAS.CLUSTER.PWD}"]'
+          delay: '1h'
+          lifetime: 3d
+          item_prototypes:
+            -
+              uuid: e0010000000000000000000000000001
+              name: 'ИБ {#IBNAME}: сессий'
+              type: DEPENDENT
+              key: 'onecras.ib.sessions[{#IBNAME}]'
+              delay: '0'
+              value_type: UNSIGNED
+              master_item:
+                key: 'onecras.json["{$RAS.SERVER}","{$RAS.CLUSTER.USER}","{$RAS.CLUSTER.PWD}"]'
+              preprocessing:
+                -
+                  type: JSONPATH
+                  parameters:
+                    - "$.bases.list[?(@.BaseName=='{#IBNAME}')].sessions.first()"
+              tags:
+                -
+                  tag: Application
+                  value: '1С Базы'
+            -
+              uuid: e0010000000000000000000000000002
+              name: 'ИБ {#IBNAME}: пользователей'
+              type: DEPENDENT
+              key: 'onecras.ib.users[{#IBNAME}]'
+              delay: '0'
+              value_type: UNSIGNED
+              master_item:
+                key: 'onecras.json["{$RAS.SERVER}","{$RAS.CLUSTER.USER}","{$RAS.CLUSTER.PWD}"]'
+              preprocessing:
+                -
+                  type: JSONPATH
+                  parameters:
+                    - "$.bases.list[?(@.BaseName=='{#IBNAME}')].users.first()"
+              tags:
+                -
+                  tag: Application
+                  value: '1С Базы'
+        -
+          uuid: d0010000000000000000000000000002
+          name: 'Обнаружение рабочих процессов'
+          type: ZABBIX_ACTIVE
+          key: 'onecras.discovery.process["{$RAS.SERVER}","{$RAS.CLUSTER.USER}","{$RAS.CLUSTER.PWD}"]'
+          delay: '1h'
+          lifetime: 3d
+          item_prototypes:
+            -
+              uuid: e0010000000000000000000000000011
+              name: 'rphost {#PROCHOST}:{#PROCPORT} (PID {#PROCPID}): память'
+              type: DEPENDENT
+              key: 'onecras.proc.memory[{#PROCPID}]'
+              delay: '0'
+              value_type: UNSIGNED
+              master_item:
+                key: 'onecras.json["{$RAS.SERVER}","{$RAS.CLUSTER.USER}","{$RAS.CLUSTER.PWD}"]'
+              preprocessing:
+                -
+                  type: JSONPATH
+                  parameters:
+                    - "$.processes[?(@.PID=='{#PROCPID}')].MemorySize.first()"
+              tags:
+                -
+                  tag: Application
+                  value: '1С Процессы'
+              trigger_prototypes:
+                -
+                  uuid: f0010000000000000000000000000011
+                  expression: 'last(/1C cluster by RAS/onecras.proc.memory[{#PROCPID}])>{$RPHOST.MEM.WARN}'
+                  name: 'Высокая память rphost PID {#PROCPID} на {HOST.NAME}'
+                  priority: WARNING
+            -
+              uuid: e0010000000000000000000000000012
+              name: 'rphost {#PROCHOST}:{#PROCPORT} (PID {#PROCPID}): соединений'
+              type: DEPENDENT
+              key: 'onecras.proc.connections[{#PROCPID}]'
+              delay: '0'
+              value_type: UNSIGNED
+              master_item:
+                key: 'onecras.json["{$RAS.SERVER}","{$RAS.CLUSTER.USER}","{$RAS.CLUSTER.PWD}"]'
+              preprocessing:
+                -
+                  type: JSONPATH
+                  parameters:
+                    - "$.processes[?(@.PID=='{#PROCPID}')].connections.first()"
+              tags:
+                -
+                  tag: Application
+                  value: '1С Процессы'
+            -
+              uuid: e0010000000000000000000000000013
+              name: 'rphost {#PROCHOST}:{#PROCPORT} (PID {#PROCPID}): сессий'
+              type: DEPENDENT
+              key: 'onecras.proc.sessions[{#PROCPID}]'
+              delay: '0'
+              value_type: UNSIGNED
+              master_item:
+                key: 'onecras.json["{$RAS.SERVER}","{$RAS.CLUSTER.USER}","{$RAS.CLUSTER.PWD}"]'
+              preprocessing:
+                -
+                  type: JSONPATH
+                  parameters:
+                    - "$.processes[?(@.PID=='{#PROCPID}')].sessions.first()"
+              tags:
+                -
+                  tag: Application
+                  value: '1С Процессы'
+            -
+              uuid: e0010000000000000000000000000014
+              name: 'rphost {#PROCHOST}:{#PROCPORT} (PID {#PROCPID}): доступная производительность'
+              type: DEPENDENT
+              key: 'onecras.proc.availperf[{#PROCPID}]'
+              delay: '0'
+              value_type: UNSIGNED
+              master_item:
+                key: 'onecras.json["{$RAS.SERVER}","{$RAS.CLUSTER.USER}","{$RAS.CLUSTER.PWD}"]'
+              preprocessing:
+                -
+                  type: JSONPATH
+                  parameters:
+                    - "$.processes[?(@.PID=='{#PROCPID}')].AvailablePerf.first()"
+              tags:
+                -
+                  tag: Application
+                  value: '1С Процессы'
+        -
+          uuid: d0010000000000000000000000000003
+          name: 'Обнаружение рабочих серверов'
+          type: ZABBIX_ACTIVE
+          key: 'onecras.discovery.server["{$RAS.SERVER}","{$RAS.CLUSTER.USER}","{$RAS.CLUSTER.PWD}"]'
+          delay: '1h'
+          lifetime: 3d
+          item_prototypes:
+            -
+              uuid: e0010000000000000000000000000021
+              name: 'Сервер {#SRVNAME}: лимит соединений'
+              type: DEPENDENT
+              key: 'onecras.server.connlimit[{#SRVNAME}]'
+              delay: '0'
+              value_type: UNSIGNED
+              master_item:
+                key: 'onecras.json["{$RAS.SERVER}","{$RAS.CLUSTER.USER}","{$RAS.CLUSTER.PWD}"]'
+              preprocessing:
+                -
+                  type: JSONPATH
+                  parameters:
+                    - "$.workingservers[?(@.Name=='{#SRVNAME}')].connections_limit.first()"
+              tags:
+                -
+                  tag: Application
+                  value: '1С Серверы'

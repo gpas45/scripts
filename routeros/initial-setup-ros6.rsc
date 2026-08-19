@@ -60,7 +60,7 @@ add action=accept chain=input comment="accept established, related connections" 
 add action=drop chain=input comment="drop invalid connections" connection-state=invalid log-prefix="DROP INPUT INVALID:"
 add action=jump chain=input comment="jump for icmp input flow" jump-target=icmp protocol=icmp
 add action=jump chain=input comment="detect intrusion" connection-state=new jump-target=detect-intrusion src-address-list=!management
-add action=jump chain=input comment="port knocking" connection-state=new dst-port=1234,2345,3456 in-interface-list=WAN jump-target=pk log=yes protocol=tcp
+add action=jump chain=input comment="port knocking" connection-state=new dst-port=1234,2345,3456 in-interface-list=WAN jump-target=pk protocol=tcp
 add action=drop chain=input dst-port=12345 in-interface-list=WAN protocol=tcp src-address-list=!pk-1
 add action=drop chain=input dst-port=12345 in-interface-list=WAN protocol=tcp src-address-list=!pk-2
 add action=add-src-to-address-list address-list=management address-list-timeout=1d chain=input connection-state=new dst-port=12345 in-interface-list=WAN log=yes log-prefix=ACCESS! protocol=tcp src-address-list=pk-3

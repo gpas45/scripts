@@ -5,7 +5,7 @@
 | Файл | Назначение |
 |---|---|
 | `autorun.rsc` | Шаблон первичной настройки роутера: адресация, отключение небезопасных сервисов (telnet, ftp, api и т.д.), NTP, часовой пояс. Замените `CHANGE_ME` на свои значения. |
-| `initial-setup-ros7.rsc` | Расширенный шаблон настройки для **RouterOS 7**: bridge, interface-lists (WAN/LAN/StS/VPN), полный firewall (port knocking, anti-bruteforce, ICMP), NAT, DNS, харднинг сервисов, OSPF-фильтры, автообновление прошивки. |
+| `initial-setup-ros7.rsc` | Расширенный шаблон настройки для **RouterOS 7**: bridge, interface-lists (WAN/WAN1/LAN/StS/VPN), полный firewall (port knocking, anti-bruteforce, ICMP), NAT, DNS, харднинг сервисов, OSPF-фильтры, автообновление прошивки. |
 | `initial-setup-ros6.rsc` | То же для **RouterOS 6** (6.41+): отличается синтаксисом NTP-клиента, отключением IPv6 через `/system package disable`, ROS6-фильтрами маршрутов и топиками логирования. |
 | `INSTALL.md` | Инструкция по установке `initial-setup-*.rsc`: быстрый `fetch`+`import`, ручная загрузка, сброс на чистую железку, шаги после импорта. |
 | `check-isp.rsc` | Проверка доступности двух провайдеров пингом и сброс соединений упавшего канала (для dual-WAN). |

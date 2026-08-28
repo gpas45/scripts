@@ -5,8 +5,8 @@
 #
 # Использование:
 #   1. Просмотрите и поправьте плейсхолдеры CHANGE_ME / <...> ниже.
-#   2. Назначьте реальные интерфейсы спискам LAN / WAN / StS / VPN в
-#      секции "/interface list member".
+#   2. Назначьте реальные интерфейсы спискам LAN / WAN1 / StS / VPN в
+#      секции "/interface list member" (WAN1 входит в WAN через include).
 #   3. Загрузите на роутер и выполните:  /import file-name=initial-setup-ros6.rsc
 #   4. Правила firewall "drop all other" намеренно используют action=passthrough:
 #      на этапе первичной настройки трафик НЕ отбрасывается, а только логируется,
@@ -37,13 +37,20 @@ add name=bridge comment="Local bridge"
 # ---------------------------------------------------------------------------
 /interface list
 add name=WAN comment="Uplinks / Internet-facing interfaces"
+add name=WAN1 comment="Uplink 1 (primary ISP)"
 add name=LAN comment="Local trusted networks"
 add name=StS comment="Site-to-Site tunnels"
 add name=VPN comment="Remote-access VPN clients"
+# WAN1 включён в состав WAN: интерфейс, добавленный в WAN1, автоматически
+# считается членом WAN, поэтому правила по WAN (firewall, NAT, discovery)
+# работают без повторного перечисления. Для второго аплинка заведите
+# аналогично WAN2 и добавьте его в include: set [find name=WAN] include=WAN1,WAN2
+set [find name=WAN] include=WAN1
 
 /interface list member
 # Назначьте здесь свои реальные интерфейсы, примеры ниже:
-# add list=WAN interface=ether1
+# Аплинк добавляйте в WAN1 (а не напрямую в WAN) — в WAN он попадёт через include:
+# add list=WAN1 interface=ether1
 add list=LAN interface=bridge
 # add list=StS interface=<gre-tunnel1>
 # add list=VPN interface=<wireguard1>
@@ -104,6 +111,11 @@ add action=drop chain=detect-intrusion src-address-list="black-list attackers"
 # Firewall NAT
 # ---------------------------------------------------------------------------
 /ip firewall nat
+# Правило для WAN1 стоит первым: трафик, уходящий через аплинк WAN1,
+# маскарадится этим правилом (удобно для отдельных счётчиков и для
+# независимой настройки каждого аплинка). Общее правило по WAN ниже
+# остаётся запасным — оно отработает для аплинков вне WAN1.
+add action=masquerade chain=srcnat comment="LAN -> Internet (WAN1)" out-interface-list=WAN1
 add action=masquerade chain=srcnat comment="LAN -> Internet" out-interface-list=WAN
 # Если внешний адрес статический, предпочтительнее src-nat вместо masquerade:
 # он не пересчитывает адрес на каждый пакет и не сбрасывает соединения при

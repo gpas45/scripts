@@ -21,7 +21,7 @@ aliases:
 > Привести роутер к безопасной базовой конфигурации «всё в одном файле». Настройки конкретного провайдера (адреса, маршруты, dhcp-client, пароли) сюда **намеренно не входят** — задавайте их отдельно для каждого аплинка.
 
 > [!warning] Перед импортом
-> - Назначьте реальные интерфейсы в `/interface list member` (LAN/WAN/StS/VPN).
+> - Назначьте реальные интерфейсы в `/interface list member` (LAN/WAN1/StS/VPN); аплинк добавляйте в `WAN1` — в `WAN` он попадёт через `include`.
 > - Привяжите порты к bridge в `/interface bridge port`.
 > - Проверьте часовой пояс и DNS-серверы.
 > - Учтите последовательность port knocking: **1234 → 2345 → 3456**, затем подключение на порт **12345**.
@@ -42,9 +42,9 @@ aliases:
 | Раздел | Действие |
 |---|---|
 | `/interface bridge` | Создаёт `bridge` (порты добавляются отдельно). |
-| `/interface list` + `member` | Списки `WAN`/`LAN`/`StS`/`VPN`, в LAN — `bridge`, в WAN — `ether1`. |
+| `/interface list` + `member` | Списки `WAN`/`WAN1`/`LAN`/`StS`/`VPN`, в LAN — `bridge`, аплинк — в `WAN1` (входит в `WAN` через `include`). |
 | `/ip firewall filter` | Цепочки `input`/`forward`/`icmp`/`pk`/`detect-intrusion`: established/related, drop invalid, port knocking, anti-bruteforce, ICMP-фильтр, межсегментные разрешения, финальный **passthrough** (счёт/лог; см. предупреждение ниже). |
-| `/ip firewall nat` | `masquerade` для LAN → Internet через `WAN`. |
+| `/ip firewall nat` | `masquerade` для LAN → Internet: отдельное правило для `WAN1` и общее для `WAN`. |
 | `/ip dns` | Резолвер для LAN/VPN/StS (`allow-remote-requests`, серверы 1.1.1.1/8.8.8.8). |
 | `/ip service` | Отключает `telnet/ftp/www/api/api-ssl`. |
 | Neighbor / MAC-server | Discovery только в `LAN`; MAC-server временно открыт (см. предупреждение ниже). |

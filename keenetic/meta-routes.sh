@@ -1,85 +1,115 @@
 #!/bin/sh
-# meta-routes.sh — статические маршруты на сети Meta (Instagram, Facebook,
-# WhatsApp) через выбранный интерфейс Keenetic (VPN, прокси, второй провайдер).
+# meta-routes.sh — маршруты на сети Meta (Instagram, Facebook, WhatsApp)
+# через выбранный шлюз или интерфейс.
 #
-# Роутер с Entware (запуск по SSH):
-#   sh /opt/scripts/meta-routes.sh add Wireguard0    # добавить маршруты
-#   sh /opt/scripts/meta-routes.sh del Wireguard0    # снять маршруты
-#   sh /opt/scripts/meta-routes.sh show Wireguard0   # показать текущие маршруты
+# Основной формат вывода (route add):
+#   sh meta-routes.sh route                  # шлюз 0.0.0.0
+#   sh meta-routes.sh route 192.168.1.2      # свой шлюз
+#   sh meta-routes.sh route-del 0.0.0.0      # снятие маршрутов
 #
-# Роутер без Entware (нет USB): выполните на любой машине
+# Формат Keenetic CLI (ip route ... auto) — для веб-CLI роутера
+# (Управление -> Диагностика -> Командная строка):
 #   sh meta-routes.sh cli Wireguard0
-# и вставьте вывод в веб-CLI роутера: Управление -> Диагностика ->
-# Командная строка (или по telnet/ssh на сам роутер).
+#   sh meta-routes.sh cli-del Wireguard0
+#
+# Применение прямо на роутере Keenetic (нужен Entware, работает через ndmc):
+#   sh /opt/scripts/meta-routes.sh add Wireguard0
+#   sh /opt/scripts/meta-routes.sh del Wireguard0
+#   sh /opt/scripts/meta-routes.sh show Wireguard0
 #
 # Имя интерфейса смотрите командой `show interface` в CLI роутера:
 # Wireguard0, OpenVPN0, L2TP0, PPTP0, Proxy0, ISP и т.п.
 #
 # Переменные окружения:
 #   META_SCOPE=core  — только диапазоны, достоверно принадлежащие Meta
-#   META_SCOPE=all   — плюс спорные сети из исходного списка (по умолчанию)
+#   META_SCOPE=all   — весь исходный список (по умолчанию)
 #   NDMC=/opt/bin/ndmc — путь к ndmc, если он не в PATH
 
 set -eu
 
 IFACE_DEFAULT="Wireguard0"
+GATEWAY_DEFAULT="0.0.0.0"
 SCOPE="${META_SCOPE:-all}"
 
 usage() {
     cat <<'USAGE'
-Использование: meta-routes.sh <add|del|cli|show|list> [интерфейс]
+Использование: meta-routes.sh <команда> [шлюз|интерфейс]
 
-  add  <iface>  добавить маршруты через ndmc и сохранить конфигурацию
-  del  <iface>  удалить маршруты через ndmc и сохранить конфигурацию
-  cli  <iface>  напечатать команды для вставки в веб-CLI (ничего не меняет)
-  show <iface>  показать статические маршруты роутера на этом интерфейсе
-  list          напечатать список сетей (сеть, маска, область, комментарий)
+  route     [шлюз]    route add <сеть> mask <маска> <шлюз>      (по умолчанию 0.0.0.0)
+  route-del [шлюз]    route delete <сеть> mask <маска> <шлюз>
+  cli       [iface]   ip route <сеть> <маска> <iface> auto      (Keenetic CLI)
+  cli-del   [iface]   no ip route <сеть> <маска> <iface>
+  add       [iface]   применить маршруты на роутере через ndmc и сохранить
+  del       [iface]   снять маршруты на роутере через ndmc и сохранить
+  show      [iface]   показать маршруты роутера на этом интерфейсе
+  list                список сетей (сеть, маска, область, комментарий)
 
 Область (META_SCOPE): core — только сети Meta, all — весь исходный список.
 USAGE
 }
 
-# Сети Meta: <сеть> <маска> <область> <комментарий>
+# Список Meta: <сеть> <маска> <область> <комментарий>
+# Порядок и состав — как в исходном списке, без объединения подсетей:
+# перекрытия допустимы, более специфичный маршрут выигрывает у более общего.
+#
 # core  — диапазоны Meta (AS32934 / AS63293 и их анонсы);
-# extra — сети из исходного списка, которые Meta не принадлежат или шире её
-#         реальных выделений: заворачивать их в VPN не обязательно, а иногда
-#         вредно (Google, AWS CloudFront и т.д.).
+# extra — записи, которые Meta не принадлежат либо шире её реальных
+#         выделений: в туннель их заворачивать не обязательно, а для
+#         Google-сетей — вредно (уедут и другие сервисы).
 nets() {
     cat <<'NETS'
-31.13.0.0 255.255.0.0 core Meta
-45.64.0.0 255.255.0.0 core Meta
-57.144.96.0 255.255.224.0 core Meta (включает 57.144.110.1, 57.144.112.34)
-57.144.222.0 255.255.255.0 core Meta
-57.144.244.0 255.255.255.0 core Meta
-57.144.248.0 255.255.255.0 core Meta
-66.220.0.0 255.255.0.0 core Meta
-69.63.0.0 255.255.0.0 core Meta
-69.171.0.0 255.255.0.0 core Meta
-74.119.0.0 255.255.0.0 core Meta
-102.132.0.0 255.255.0.0 core Meta
-102.221.0.0 255.255.0.0 core Meta
-103.4.0.0 255.255.0.0 core Meta
-129.134.0.0 255.255.0.0 core Meta
-157.240.0.0 255.255.0.0 core Meta (включает все узлы 157.240.x.x из списка)
-163.70.0.0 255.255.0.0 core Meta
-163.77.128.0 255.255.128.0 core Meta
-163.114.0.0 255.255.0.0 core Meta
-164.163.191.64 255.255.255.192 core Meta
-173.252.0.0 255.255.0.0 core Meta
-179.60.0.0 255.255.0.0 core Meta
-185.60.0.0 255.255.0.0 core Meta
-185.89.0.0 255.255.0.0 core Meta
-199.201.0.0 255.255.0.0 core Meta (у Meta реально 199.201.64.0/22)
-204.15.20.0 255.255.252.0 core Meta
-45.130.4.0 255.255.255.0 extra из исходного списка, проверьте
-77.240.43.0 255.255.255.0 extra из исходного списка, проверьте
-87.245.208.0 255.255.255.0 extra из исходного списка, проверьте
-87.245.223.97 255.255.255.255 extra отдельный узел, вне 87.245.208.0/24
-99.84.0.0 255.255.0.0 extra AWS CloudFront, не только Meta
-142.250.0.0 255.254.0.0 extra Google, НЕ Meta
-147.75.0.0 255.255.0.0 extra Equinix Metal, не только Meta
-173.194.10.0 255.255.255.0 extra Google, НЕ Meta
+157.240.253.174 255.255.255.255 core узел Meta
+157.240.253.172 255.255.255.255 core узел Meta
+157.240.253.167 255.255.255.255 core узел Meta
+157.240.253.63 255.255.255.255 core узел Meta
+157.240.253.32 255.255.255.255 core узел Meta
+157.240.252.174 255.255.255.255 core узел Meta
+157.240.252.172 255.255.255.255 core узел Meta
+157.240.252.167 255.255.255.255 core узел Meta
+157.240.252.63 255.255.255.255 core узел Meta
+157.240.252.38 255.255.255.255 core узел Meta
+57.144.112.34 255.255.255.255 core узел Meta
+57.144.110.1 255.255.255.255 core узел Meta
+157.240.205.174 255.255.255.255 core узел Meta
+87.245.223.97 255.255.255.255 extra узел, проверьте принадлежность
 213.102.128.0 255.255.255.0 extra Telia, не только Meta
+204.15.20.0 255.255.252.0 core Meta
+199.201.0.0 255.255.0.0 core Meta (реально выделено 199.201.64.0/22)
+185.89.0.0 255.255.0.0 core Meta
+185.60.0.0 255.255.0.0 core Meta
+179.60.0.0 255.255.0.0 core Meta
+173.252.0.0 255.255.0.0 core Meta
+164.163.191.64 255.255.255.192 core Meta
+163.114.0.0 255.255.0.0 core Meta
+163.77.128.0 255.255.128.0 core Meta
+163.70.0.0 255.255.0.0 core Meta
+157.240.0.0 255.255.0.0 core Meta
+147.75.0.0 255.255.0.0 extra Equinix Metal, не только Meta
+142.250.0.0 255.254.0.0 extra Google, НЕ Meta
+129.134.0.0 255.255.0.0 core Meta
+103.4.0.0 255.255.0.0 core Meta
+102.221.0.0 255.255.0.0 core Meta
+102.132.0.0 255.255.0.0 core Meta
+99.84.0.0 255.255.0.0 extra AWS CloudFront, не только Meta
+87.245.208.0 255.255.255.0 extra проверьте принадлежность
+74.119.0.0 255.255.0.0 core Meta
+69.171.0.0 255.255.0.0 core Meta
+69.63.0.0 255.255.0.0 core Meta
+66.220.0.0 255.255.0.0 core Meta
+45.64.0.0 255.255.0.0 core Meta
+31.13.0.0 255.255.0.0 core Meta
+157.240.0.0 255.255.255.0 core Meta
+157.240.251.0 255.255.255.0 core Meta
+157.240.205.0 255.255.255.0 core Meta
+173.194.10.0 255.255.255.0 extra Google, НЕ Meta
+77.240.43.0 255.255.255.0 extra проверьте принадлежность
+57.144.222.0 255.255.255.0 core Meta
+45.130.4.0 255.255.255.0 extra проверьте принадлежность
+57.144.96.0 255.255.224.0 core Meta
+57.144.244.0 255.255.255.0 core Meta
+157.240.201.0 255.255.255.0 core Meta
+31.13.72.0 255.255.255.0 core Meta
+57.144.248.0 255.255.255.0 core Meta
 NETS
 }
 
@@ -91,6 +121,15 @@ selected_nets() {
             continue
         fi
         printf '%s %s\n' "$net" "$mask"
+    done
+}
+
+# Печатает команды route: gen_route <add|delete> <шлюз>
+gen_route() {
+    route_action="$1"
+    route_gw="$2"
+    selected_nets | while read -r net mask; do
+        printf 'route %s %s mask %s %s\n' "$route_action" "$net" "$mask" "$route_gw"
     done
 }
 
@@ -122,7 +161,7 @@ find_ndmc() {
     return 1
 }
 
-# Выполняет сгенерированные команды на роутере: apply <add|del> <интерфейс>
+# Выполняет команды Keenetic CLI на роутере: apply <add|del> <интерфейс>
 apply() {
     apply_action="$1"
     apply_iface="$2"
@@ -155,18 +194,29 @@ apply() {
 }
 
 action="${1:-}"
-iface="${2:-$IFACE_DEFAULT}"
+target="${2:-}"
 
 case "$action" in
-    add|del)
-        apply "$action" "$iface"
+    route)
+        gen_route add "${target:-$GATEWAY_DEFAULT}"
+        ;;
+    route-del)
+        gen_route delete "${target:-$GATEWAY_DEFAULT}"
         ;;
     cli)
-        gen_cmds add "$iface"
+        gen_cmds add "${target:-$IFACE_DEFAULT}"
+        ;;
+    cli-del)
+        gen_cmds del "${target:-$IFACE_DEFAULT}"
+        ;;
+    add|del)
+        apply "$action" "${target:-$IFACE_DEFAULT}"
         ;;
     show)
+        show_iface="${target:-$IFACE_DEFAULT}"
         if ndmc_bin="$(find_ndmc)"; then
-            "$ndmc_bin" -c "show ip route" | grep -i "$iface" || echo "Маршрутов через $iface нет."
+            "$ndmc_bin" -c "show ip route" | grep -i "$show_iface" \
+                || echo "Маршрутов через $show_iface нет."
         else
             echo "Ошибка: не найден ndmc — команда доступна только на роутере." >&2
             exit 1

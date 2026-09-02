@@ -13,6 +13,7 @@
 | [`1c/`](1c/) | Windows-скрипты для 1С:Предприятие (исключения Defender, раздача баз, очистка кэша). |
 | [`windows/`](windows/) | PowerShell-скрипты для Windows (RD Gateway) + `oobe/` — автоустановка Windows. |
 | [`pgsql/`](pgsql/) | PostgreSQL / Postgres Pro: установка, бэкапы, отказоустойчивость (`failover/`, `pgpro/`). |
+| [`keenetic/`](keenetic/) | Скрипты для роутеров Keenetic: маршрутизация сетей Meta через VPN-интерфейс. |
 | [`routeros/`](routeros/) | Скрипты и конфиги MikroTik RouterOS + `docs/` (Obsidian-документация). |
 | [`proxmox/`](proxmox/) | Скрипты для Proxmox VE. |
 | [`linux/`](linux/) | Linux: тесты железа, конфиги окружения, 1С, motd. |

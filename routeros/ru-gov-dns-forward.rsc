@@ -20,7 +20,7 @@
 :local domains {
     "gosuslugi.ru";
     "xn--c1aapkosapc.xn--p1ai";
-    "nalog.gov.ru";
+    "gov.ru";
     "nalog.ru";
     "cdn.ngenix.net";
     "zakupki.gov.ru";

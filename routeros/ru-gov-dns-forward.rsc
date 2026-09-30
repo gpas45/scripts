@@ -29,6 +29,9 @@
     "tektorg.ru";
     "zakazrf.ru";
     "etp-ets.ru"
+    "max.ru"
+    "vk.ru"
+    "vk.com"
 }
 
 :put "[ru-gov-dns] RouterOS $[/system/resource/get version]"

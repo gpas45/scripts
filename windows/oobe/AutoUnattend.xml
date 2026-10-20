@@ -53,6 +53,18 @@
                     <Order>1</Order>
                 </SynchronousCommand>       
             </FirstLogonCommands> -->
+            <!--
+              Пост-установка: ПО (с NAS / winget), правки реестра, системные настройки.
+              Сначала ищется <диск>:\oobe\postinstall.ps1 (положите папку oobe в корень
+              установочной флешки), иначе скрипт берётся из репозитория.
+            -->
+            <FirstLogonCommands>
+                <SynchronousCommand wcm:action="add">
+                    <Order>1</Order>
+                    <Description>Postinstall: software, registry, system settings</Description>
+                    <CommandLine>powershell -ExecutionPolicy Bypass -NoProfile -Command "$l=67..90|%{'{0}:\oobe\postinstall.ps1' -f [char]$_}|?{Test-Path $_}|select -First 1; if($l){powershell -ExecutionPolicy Bypass -NoProfile -File $l -Profiles base}else{iex ((irm 'https://raw.githubusercontent.com/gpas45/scripts/main/windows/oobe/postinstall.ps1' -UseBasicParsing) -replace '^\uFEFF')}"</CommandLine>
+                </SynchronousCommand>
+            </FirstLogonCommands>
             <OOBE>
                 <HideEULAPage>true</HideEULAPage>
                 <HideOnlineAccountScreens>true</HideOnlineAccountScreens>

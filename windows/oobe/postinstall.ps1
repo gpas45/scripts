@@ -1,0 +1,546 @@
+﻿<#
+.SYNOPSIS
+    Пост-установочная настройка рабочей станции: ПО, правки реестра, системные параметры.
+
+.DESCRIPTION
+    Запускается автоматически при первом входе (FirstLogonCommands в файле ответов)
+    либо вручную с правами администратора:
+
+        powershell -ExecutionPolicy Bypass -File .\postinstall.ps1 -Profiles base,browser
+
+    Что делает (всё описано данными в postinstall.json, а не в коде):
+      1. ждёт поднятия сети;
+      2. подключается к Synology NAS (SMB или HTTP) — основной источник дистрибутивов;
+      3. ставит ПО: NAS -> winget -> прямая ссылка (порядок задаётся software.source);
+      4. при office.enabled ставит Office через ODT или winget;
+      5. применяет правки реестра;
+      6. применяет системные настройки (часовой пояс, электропитание, RDP, имя ПК).
+
+    Ошибка на отдельном пакете не прерывает работу: в конце печатается сводка,
+    код возврата 1, если что-то не установилось. Повторный запуск безопасен.
+
+.PARAMETER Profiles
+    Какие наборы применять. В postinstall.json у каждого элемента есть profiles;
+    элемент без profiles применяется всегда. По умолчанию — base.
+
+.PARAMETER ConfigPath
+    Путь к postinstall.json. По умолчанию ищется рядом со скриптом и в
+    %ProgramData%\oobe, иначе скачивается с ConfigUri.
+
+.PARAMETER NasUser
+.PARAMETER NasPassword
+    Учётные данные для SMB-папки NAS. Перекрывают значения из конфига.
+    Пароль в репозиторий не кладём — см. nas.passwordFile в postinstall.json.
+
+.NOTES
+    Документация по файлам ответов:
+    https://learn.microsoft.com/ru-ru/windows-hardware/customize/desktop/unattend/
+#>
+[CmdletBinding()]
+param(
+    [string[]]$Profiles = @('base'),
+    [string]$ConfigPath,
+    [string]$ConfigUri = 'https://raw.githubusercontent.com/gpas45/scripts/main/windows/oobe/postinstall.json',
+    [string]$NasShare,
+    [string]$NasUser,
+    [string]$NasPassword,
+    [switch]$SkipSoftware,
+    [switch]$SkipOffice,
+    [switch]$SkipRegistry,
+    [switch]$SkipSystem,
+    [string]$LogPath = (Join-Path -Path $env:ProgramData -ChildPath 'oobe\postinstall.log')
+)
+
+$ErrorActionPreference = 'Stop'
+
+$script:Failures = New-Object 'System.Collections.Generic.List[string]'
+$script:WorkDir = Join-Path -Path $env:TEMP -ChildPath 'oobe-postinstall'
+$script:Winget = $null
+$script:RebootRequired = $false
+
+New-Item -ItemType Directory -Force -Path $script:WorkDir | Out-Null
+New-Item -ItemType Directory -Force -Path (Split-Path -Parent $LogPath) | Out-Null
+try { Start-Transcript -Path $LogPath -Append | Out-Null } catch { Write-Warning 'Не удалось начать запись лога.' }
+
+try {
+    [Net.ServicePointManager]::SecurityProtocol =
+        [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+}
+catch {
+    Write-Warning "Не удалось включить TLS 1.2: $($_.Exception.Message)"
+}
+
+# --- Вспомогательные функции -------------------------------------------------
+
+function Write-Step {
+    param([string]$Message)
+    Write-Host ''
+    Write-Host "=== $Message" -ForegroundColor Cyan
+}
+
+function Invoke-Safely {
+    param(
+        [string]$Label,
+        [scriptblock]$Action
+    )
+    try {
+        & $Action
+        Write-Host "  [ok] $Label" -ForegroundColor DarkGreen
+    }
+    catch {
+        $script:Failures.Add("$Label — $($_.Exception.Message)")
+        Write-Warning "  [!] $Label — $($_.Exception.Message)"
+    }
+}
+
+function Test-ProfileMatch {
+    param($Item)
+    if (-not $Item.PSObject.Properties['profiles'] -or -not $Item.profiles) { return $true }
+    foreach ($p in $Item.profiles) {
+        if ($Profiles -contains $p) { return $true }
+    }
+    return $false
+}
+
+function Get-Configuration {
+    $candidates = @()
+    if ($ConfigPath) { $candidates += $ConfigPath }
+    if ($PSScriptRoot) { $candidates += (Join-Path -Path $PSScriptRoot -ChildPath 'postinstall.json') }
+    $candidates += (Join-Path -Path $env:ProgramData -ChildPath 'oobe\postinstall.json')
+
+    foreach ($c in $candidates) {
+        if ($c -and (Test-Path -LiteralPath $c)) {
+            Write-Host "Конфигурация: $c"
+            return (Get-Content -LiteralPath $c -Raw -Encoding UTF8 | ConvertFrom-Json)
+        }
+    }
+
+    if (-not $ConfigUri) { throw 'postinstall.json не найден и ConfigUri не задан.' }
+    Write-Host "Конфигурация: $ConfigUri"
+    $raw = (Invoke-WebRequest -Uri $ConfigUri -UseBasicParsing).Content
+    if ($raw -is [byte[]]) { $raw = [Text.Encoding]::UTF8.GetString($raw) }
+    return ($raw | ConvertFrom-Json)
+}
+
+function Wait-Network {
+    param([int]$TimeoutSeconds = 120)
+    if ($TimeoutSeconds -le 0) { return }
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while ((Get-Date) -lt $deadline) {
+        $up = Get-NetConnectionProfile -ErrorAction SilentlyContinue |
+            Where-Object { $_.IPv4Connectivity -eq 'Internet' -or $_.IPv4Connectivity -eq 'LocalNetwork' }
+        if ($up) {
+            Write-Host "Сеть доступна: $(($up | Select-Object -First 1).Name)"
+            return
+        }
+        Start-Sleep -Seconds 5
+    }
+    Write-Warning 'Сеть не поднялась за отведённое время — часть шагов может не выполниться.'
+}
+
+# --- NAS ---------------------------------------------------------------------
+
+function Get-NasPassword {
+    param($Nas)
+    if ($NasPassword) { return $NasPassword }
+    if (-not $Nas.PSObject.Properties['passwordFile'] -or -not $Nas.passwordFile) { return $null }
+
+    $file = $Nas.passwordFile
+    if (-not [IO.Path]::IsPathRooted($file)) {
+        $roots = @()
+        if ($PSScriptRoot) { $roots += $PSScriptRoot }
+        $roots += (Join-Path -Path $env:ProgramData -ChildPath 'oobe')
+        foreach ($r in $roots) {
+            $candidate = Join-Path -Path $r -ChildPath $file
+            if (Test-Path -LiteralPath $candidate) { $file = $candidate; break }
+        }
+    }
+    if (Test-Path -LiteralPath $file) {
+        return (Get-Content -LiteralPath $file -Raw).Trim()
+    }
+    Write-Warning "Файл с паролем NAS не найден: $($Nas.passwordFile)"
+    return $null
+}
+
+function Connect-NasShare {
+    param($Nas)
+
+    if ($Nas.type -eq 'http') {
+        if ($Nas.ignoreCertErrors) {
+            # DSM по умолчанию отдаёт самоподписанный сертификат.
+            [Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
+            Write-Warning 'Проверка TLS-сертификата NAS отключена (nas.ignoreCertErrors).'
+        }
+        return
+    }
+
+    $share = $script:NasSharePath
+    $user = if ($NasUser) { $NasUser } else { $Nas.user }
+    if (-not $user) {
+        Write-Host "SMB: $share без учётных данных (гостевой доступ)."
+        return
+    }
+    $password = Get-NasPassword -Nas $Nas
+
+    try {
+        New-SmbMapping -RemotePath $share -UserName $user -Password $password -ErrorAction Stop | Out-Null
+        Write-Host "SMB: подключено $share как $user."
+    }
+    catch {
+        Write-Warning "New-SmbMapping не сработал ($($_.Exception.Message)) — пробую net use."
+        & net.exe use $share $password /user:$user 2>&1 | Write-Host
+        if ($LASTEXITCODE -ne 0) {
+            throw "Не удалось подключиться к $share (net use код $LASTEXITCODE). Проверьте учётную запись: гостевой вход в SMB в Windows 10/11 запрещён по умолчанию."
+        }
+    }
+}
+
+function Disconnect-NasShare {
+    param($Nas)
+    if ($Nas.type -ne 'smb') { return }
+    try { Remove-SmbMapping -RemotePath $script:NasSharePath -Force -ErrorAction Stop }
+    catch { & net.exe use $script:NasSharePath /delete /y 2>&1 | Out-Null }
+}
+
+function Get-NasFile {
+    param(
+        $Nas,
+        [string]$RelativePath
+    )
+    if (-not $RelativePath) { return $null }
+    $dest = Join-Path -Path $script:WorkDir -ChildPath (Split-Path -Leaf ($RelativePath -replace '/', '\'))
+
+    if ($Nas.type -eq 'http') {
+        $url = '{0}/{1}' -f $Nas.baseUrl.TrimEnd('/'), ($RelativePath -replace '\\', '/')
+        try {
+            Invoke-WebRequest -Uri $url -OutFile $dest -UseBasicParsing
+            return $dest
+        }
+        catch {
+            Write-Host "  NAS (http): $url недоступен — $($_.Exception.Message)"
+            return $null
+        }
+    }
+
+    $src = Join-Path -Path $script:NasSharePath -ChildPath ($RelativePath -replace '/', '\')
+    if (-not (Test-Path -LiteralPath $src)) {
+        return $null
+    }
+    Copy-Item -LiteralPath $src -Destination $dest -Force
+    return $dest
+}
+
+# --- Установка ПО ------------------------------------------------------------
+
+function Get-WingetPath {
+    param([int]$TimeoutSeconds = 90)
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    do {
+        $cmd = Get-Command -Name 'winget.exe' -ErrorAction SilentlyContinue
+        if ($cmd) { return $cmd.Source }
+
+        $pkg = Get-AppxPackage -Name 'Microsoft.DesktopAppInstaller' -ErrorAction SilentlyContinue |
+            Sort-Object -Property Version -Descending | Select-Object -First 1
+        if ($pkg -and $pkg.InstallLocation) {
+            $candidate = Join-Path -Path $pkg.InstallLocation -ChildPath 'winget.exe'
+            if (Test-Path -LiteralPath $candidate) { return $candidate }
+        }
+        Start-Sleep -Seconds 5
+    } while ((Get-Date) -lt $deadline)
+    return $null
+}
+
+function Initialize-Winget {
+    # При первом входе App Installer регистрируется асинхронно, поэтому ждём.
+    $path = Get-WingetPath -TimeoutSeconds 90
+    if ($path) { return $path }
+
+    Write-Warning 'winget не найден — пробую перерегистрировать App Installer.'
+    try {
+        Add-AppxPackage -RegisterByFamilyName -MainPackage 'Microsoft.DesktopAppInstaller_8wekyb3d8bbwe' -ErrorAction Stop
+    }
+    catch {
+        Write-Warning "Перерегистрация не удалась: $($_.Exception.Message)"
+    }
+    $path = Get-WingetPath -TimeoutSeconds 30
+    if ($path) { return $path }
+
+    Write-Warning 'Пробую поставить App Installer с https://aka.ms/getwinget.'
+    try {
+        $bundle = Join-Path -Path $script:WorkDir -ChildPath 'DesktopAppInstaller.msixbundle'
+        Invoke-WebRequest -Uri 'https://aka.ms/getwinget' -OutFile $bundle -UseBasicParsing
+        Add-AppxPackage -Path $bundle -ErrorAction Stop
+    }
+    catch {
+        Write-Warning "Не удалось: $($_.Exception.Message)"
+    }
+    return (Get-WingetPath -TimeoutSeconds 30)
+}
+
+function Install-WithWinget {
+    param([string]$Id)
+
+    if (-not $script:Winget) { $script:Winget = Initialize-Winget }
+    if (-not $script:Winget) { throw 'winget недоступен (нет App Installer и не удалось его поставить).' }
+
+    $common = @(
+        'install', '--id', $Id, '--exact', '--source', 'winget', '--silent',
+        '--accept-package-agreements', '--accept-source-agreements', '--disable-interactivity'
+    )
+
+    $withScope = $common + @('--scope', 'machine')
+    & $script:Winget @withScope 2>&1 | Write-Host
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "  --scope machine не подошёл (код $LASTEXITCODE) — повторяю без него."
+        & $script:Winget @common 2>&1 | Write-Host
+    }
+    if ($LASTEXITCODE -ne 0) {
+        # Может быть «уже установлено» — проверяем фактическое наличие.
+        & $script:Winget 'list' '--id' $Id '--exact' '--accept-source-agreements' 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "winget не смог установить $Id." }
+        Write-Host "  $Id уже установлен."
+    }
+}
+
+function Install-FromFile {
+    param(
+        [string]$Path,
+        [string]$Arguments
+    )
+    $extension = [IO.Path]::GetExtension($Path).ToLowerInvariant()
+
+    if ($extension -eq '.msi') {
+        $msiArgs = if ($Arguments) { "/i `"$Path`" $Arguments" } else { "/i `"$Path`" /qn /norestart" }
+        $proc = Start-Process -FilePath 'msiexec.exe' -ArgumentList $msiArgs -Wait -PassThru
+    }
+    elseif ($extension -eq '.ps1') {
+        $proc = Start-Process -FilePath 'powershell.exe' -Wait -PassThru `
+            -ArgumentList @('-ExecutionPolicy', 'Bypass', '-NoProfile', '-File', $Path)
+    }
+    elseif ($Arguments) {
+        $proc = Start-Process -FilePath $Path -ArgumentList $Arguments -Wait -PassThru
+    }
+    else {
+        $proc = Start-Process -FilePath $Path -Wait -PassThru
+    }
+
+    $code = $proc.ExitCode
+    if ($code -eq 3010 -or $code -eq 1641) {
+        $script:RebootRequired = $true
+        Write-Host '  установщик просит перезагрузку.'
+        return
+    }
+    if ($code -ne 0) { throw "установщик вернул код $code." }
+}
+
+function Install-Application {
+    param(
+        $Item,
+        $Nas
+    )
+    $source = if ($Item.PSObject.Properties['source'] -and $Item.source) { $Item.source } else { 'auto' }
+    $nasReady = ($Nas -and $Nas.enabled)
+
+    if (($source -eq 'auto' -or $source -eq 'nas') -and $nasReady -and $Item.nasPath) {
+        $file = Get-NasFile -Nas $Nas -RelativePath $Item.nasPath
+        if ($file) {
+            Install-FromFile -Path $file -Arguments $Item.installerArgs
+            return
+        }
+        if ($source -eq 'nas') { throw "на NAS нет файла $($Item.nasPath)." }
+        Write-Host "  на NAS нет $($Item.nasPath) — пробую следующий источник."
+    }
+
+    if (($source -eq 'auto' -or $source -eq 'winget') -and $Item.wingetId) {
+        Install-WithWinget -Id $Item.wingetId
+        return
+    }
+
+    if (($source -eq 'auto' -or $source -eq 'url') -and $Item.installerUrl) {
+        $name = Split-Path -Leaf ([uri]$Item.installerUrl).LocalPath
+        $dest = Join-Path -Path $script:WorkDir -ChildPath $name
+        Invoke-WebRequest -Uri $Item.installerUrl -OutFile $dest -UseBasicParsing
+        Install-FromFile -Path $dest -Arguments $Item.installerArgs
+        return
+    }
+
+    throw 'не задан ни один источник (nasPath / wingetId / installerUrl).'
+}
+
+function Install-Office {
+    param(
+        $Office,
+        $Nas
+    )
+    if ($Office.mode -eq 'winget') {
+        Install-WithWinget -Id $Office.wingetId
+        return
+    }
+
+    $nasReady = ($Nas -and $Nas.enabled)
+
+    $setup = $null
+    if ($Office.setupPath -and (Test-Path -LiteralPath $Office.setupPath)) {
+        $setup = $Office.setupPath
+    }
+    if (-not $setup -and $nasReady -and $Office.setupNasPath) {
+        $setup = Get-NasFile -Nas $Nas -RelativePath $Office.setupNasPath
+    }
+    if (-not $setup) {
+        Write-Host '  setup.exe не найден — ставлю Office Deployment Tool через winget.'
+        Install-WithWinget -Id 'Microsoft.OfficeDeploymentTool'
+        $setup = Get-ChildItem -Filter 'setup.exe' -Recurse -ErrorAction SilentlyContinue -Path @(
+            (Join-Path -Path $env:ProgramFiles -ChildPath 'OfficeDeploymentTool'),
+            (Join-Path -Path ${env:ProgramFiles(x86)} -ChildPath 'OfficeDeploymentTool')
+        ) | Select-Object -First 1 -ExpandProperty FullName
+    }
+    if (-not $setup) { throw 'не найден setup.exe из Office Deployment Tool.' }
+
+    $config = $null
+    if ($Office.configPath -and (Test-Path -LiteralPath $Office.configPath)) {
+        $config = $Office.configPath
+    }
+    if (-not $config -and $nasReady -and $Office.configNasPath) {
+        $config = Get-NasFile -Nas $Nas -RelativePath $Office.configNasPath
+    }
+    if (-not $config -and $Office.configUri) {
+        $config = Join-Path -Path $script:WorkDir -ChildPath 'office-configuration.xml'
+        Invoke-WebRequest -Uri $Office.configUri -OutFile $config -UseBasicParsing
+    }
+    if (-not $config) { throw 'не найден configuration.xml для Office.' }
+
+    Write-Host "  ODT: $setup /configure $config"
+    $proc = Start-Process -FilePath $setup -ArgumentList @('/configure', $config) -Wait -PassThru
+    if ($proc.ExitCode -ne 0) { throw "setup.exe вернул код $($proc.ExitCode)." }
+}
+
+# --- Реестр и система --------------------------------------------------------
+
+function Set-RegistryTweak {
+    param($Tweak)
+    if (-not (Test-Path -LiteralPath $Tweak.path)) {
+        New-Item -Path $Tweak.path -Force | Out-Null
+    }
+    $type = if ($Tweak.PSObject.Properties['type'] -and $Tweak.type) { $Tweak.type } else { 'DWord' }
+    New-ItemProperty -LiteralPath $Tweak.path -Name $Tweak.name -PropertyType $type -Value $Tweak.value -Force | Out-Null
+}
+
+function Set-SystemSetting {
+    param($Settings)
+
+    if ($Settings.timeZone) {
+        Invoke-Safely -Label "часовой пояс $($Settings.timeZone)" -Action {
+            & tzutil.exe /s $Settings.timeZone
+            if ($LASTEXITCODE -ne 0) { throw "tzutil вернул код $LASTEXITCODE." }
+        }
+    }
+
+    if ($Settings.disableHibernation) {
+        Invoke-Safely -Label 'отключение гибернации' -Action {
+            & powercfg.exe /hibernate off
+            if ($LASTEXITCODE -ne 0) { throw "powercfg вернул код $LASTEXITCODE." }
+        }
+    }
+
+    if ($Settings.neverSleepOnAc) {
+        Invoke-Safely -Label 'питание от сети: не засыпать' -Action {
+            & powercfg.exe /change standby-timeout-ac 0
+            & powercfg.exe /change hibernate-timeout-ac 0
+            & powercfg.exe /change disk-timeout-ac 0
+            & powercfg.exe /change monitor-timeout-ac 15
+        }
+    }
+
+    if ($Settings.enableRdp) {
+        Invoke-Safely -Label 'включение RDP' -Action {
+            Set-ItemProperty -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server' `
+                -Name 'fDenyTSConnections' -Value 0 -Type DWord
+            Enable-NetFirewallRule -DisplayGroup 'Remote Desktop' -ErrorAction SilentlyContinue
+        }
+    }
+
+    if ($Settings.computerName) {
+        Invoke-Safely -Label "имя компьютера $($Settings.computerName)" -Action {
+            if ($env:COMPUTERNAME -ne $Settings.computerName) {
+                Rename-Computer -NewName $Settings.computerName -Force -ErrorAction Stop
+                $script:RebootRequired = $true
+            }
+        }
+    }
+
+    if ($Settings.restartExplorer) {
+        Invoke-Safely -Label 'перезапуск Проводника (применение настроек HKCU)' -Action {
+            Stop-Process -Name 'explorer' -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+# --- Основной сценарий -------------------------------------------------------
+
+$config = Get-Configuration
+Write-Host "Профили: $($Profiles -join ', ')"
+
+$nas = $null
+if ($config.PSObject.Properties['nas']) { $nas = $config.nas }
+if ($nas -and $NasShare) { $nas.share = $NasShare }
+$script:NasSharePath = if ($nas) { $nas.share } else { $null }
+
+if ($nas -and $nas.enabled) {
+    Write-Step 'Сеть и NAS'
+    $timeout = if ($nas.PSObject.Properties['waitForNetworkSeconds']) { [int]$nas.waitForNetworkSeconds } else { 120 }
+    Wait-Network -TimeoutSeconds $timeout
+    Invoke-Safely -Label "подключение к NAS ($($nas.type))" -Action { Connect-NasShare -Nas $nas }
+}
+
+if (-not $SkipSoftware -and $config.PSObject.Properties['software']) {
+    Write-Step 'Установка ПО'
+    foreach ($item in $config.software) {
+        if (-not (Test-ProfileMatch -Item $item)) { continue }
+        Write-Host "- $($item.name)"
+        Invoke-Safely -Label $item.name -Action { Install-Application -Item $item -Nas $nas }
+    }
+}
+
+if (-not $SkipOffice -and $config.PSObject.Properties['office'] -and $config.office.enabled) {
+    Write-Step 'Установка Microsoft Office'
+    Invoke-Safely -Label "Office ($($config.office.mode))" -Action { Install-Office -Office $config.office -Nas $nas }
+}
+
+if (-not $SkipRegistry -and $config.PSObject.Properties['registry']) {
+    Write-Step 'Правки реестра'
+    foreach ($tweak in $config.registry) {
+        if (-not (Test-ProfileMatch -Item $tweak)) { continue }
+        Invoke-Safely -Label $tweak.description -Action { Set-RegistryTweak -Tweak $tweak }
+    }
+}
+
+if (-not $SkipSystem -and $config.PSObject.Properties['system']) {
+    Write-Step 'Системные настройки'
+    Set-SystemSetting -Settings $config.system
+}
+
+if ($nas -and $nas.enabled -and $nas.type -eq 'smb') {
+    Invoke-Safely -Label 'отключение от NAS' -Action { Disconnect-NasShare -Nas $nas }
+}
+
+Remove-Item -LiteralPath $script:WorkDir -Recurse -Force -ErrorAction SilentlyContinue
+
+Write-Step 'Итог'
+if ($script:Failures.Count -eq 0) {
+    Write-Host 'Все шаги выполнены успешно.' -ForegroundColor Green
+}
+else {
+    Write-Warning "Не выполнено шагов: $($script:Failures.Count)"
+    foreach ($f in $script:Failures) { Write-Host "  - $f" -ForegroundColor Yellow }
+}
+Write-Host "Лог: $LogPath"
+
+if ($script:RebootRequired -or ($config.system -and $config.system.rebootWhenDone)) {
+    Write-Host 'Требуется перезагрузка — через 60 секунд. Отменить: shutdown /a'
+    & shutdown.exe /r /t 60 /c 'Завершение настройки рабочей станции'
+}
+
+try { Stop-Transcript | Out-Null } catch { Write-Verbose 'Transcript уже остановлен.' }
+
+if ($script:Failures.Count -gt 0) { exit 1 }
+exit 0

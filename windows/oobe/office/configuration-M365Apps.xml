@@ -1,0 +1,31 @@
+<!--
+  Microsoft 365 Apps для предприятий (подписка) для Office Deployment Tool.
+  Применяется так: setup.exe /configure configuration-M365Apps.xml
+  Справочник параметров:
+  https://learn.microsoft.com/ru-ru/microsoft-365-apps/deploy/office-deployment-tool-configuration-options
+
+  Лицензия активируется входом пользователя в учётную запись Microsoft 365,
+  PIDKEY не нужен. Канал MonthlyEnterprise — ежемесячный корпоративный.
+-->
+<Configuration ID="m365apps-ru">
+    <Add OfficeClientEdition="64" Channel="MonthlyEnterprise" MigrateArch="TRUE">
+        <Product ID="O365ProPlusRetail">
+            <Language ID="ru-ru" />
+            <Language ID="en-us" />
+            <ExcludeApp ID="Groove" />
+            <ExcludeApp ID="Lync" />
+            <ExcludeApp ID="Publisher" />
+            <ExcludeApp ID="Access" />
+        </Product>
+    </Add>
+
+    <RemoveMSI />
+    <Updates Enabled="TRUE" Channel="MonthlyEnterprise" />
+
+    <Property Name="SharedComputerLicensing" Value="0" />
+    <Property Name="FORCEAPPSHUTDOWN" Value="TRUE" />
+    <Property Name="PinIconsToTaskbar" Value="FALSE" />
+
+    <Display Level="None" AcceptEULA="TRUE" />
+    <Logging Level="Standard" Path="%ProgramData%\oobe" />
+</Configuration>

@@ -95,6 +95,22 @@
       ]
     },
     {
+      "name": "WinRAR",
+      "source": "auto",
+      "wingetId": "RARLab.WinRAR",
+      "nasPath": "WinRAR/winrar-x64.exe",
+      "installerArgs": "/S",
+      "installerUrl": "",
+      "profiles": [
+        "base"
+      ],
+      "_comment": [
+        "WinRAR лицензионный. Чтобы установка не оказалась пробной, положите рядом",
+        "с дистрибутивом ваш rarreg.key: установщик подхватывает его из своей папки.",
+        "Иначе ключ придётся класть в каталог программы отдельным шагом."
+      ]
+    },
+    {
       "name": "Notepad++",
       "source": "auto",
       "wingetId": "Notepad++.Notepad++",
@@ -152,7 +168,7 @@
       "name": "КриптоПро CSP",
       "source": "auto",
       "wingetId": "",
-      "nasPath": "CryptoPro/CSP/csp-x64-kc1.msi",
+      "nasPath": "CryptoPro/CSP/csp-x64-rus.msi",
       "installerArgs": "/qn /norestart",
       "installerUrl": "",
       "timeoutSeconds": 900,
@@ -162,8 +178,7 @@
       ],
       "_comment": [
         "Дистрибутив берётся по вашей лицензии с cryptopro.ru и кладётся на NAS;",
-        "в winget КриптоПро не публикуется. Имя MSI внутри дистрибутива",
-        "отличается по версии и варианту (KC1/KC2) — сверьте с nasPath.",
+        "в winget КриптоПро не публикуется.",
         "Лицензия вводится отдельно, установщик её не спрашивает:",
         "\"C:\\Program Files\\Crypto Pro\\CSP\\cpconfig.exe\" -license -set <серийный номер>",
         "Набор компонентов при необходимости задаётся через ADDLOCAL в installerArgs."
@@ -173,14 +188,21 @@
       "name": "КриптоПро ЭЦП Browser plug-in",
       "source": "auto",
       "wingetId": "",
-      "nasPath": "CryptoPro/cprocsp-pki-cades-x64.msi",
-      "installerArgs": "/qn /norestart",
+      "nasPath": "CryptoPro/cadesplugin.exe",
+      "installerArgs": "/s",
       "installerUrl": "",
       "profiles": [
         "base",
         "crypto"
       ],
-      "_comment": "wingetId пустой — заполните installerUrl ссылкой на дистрибутив с вашего файлового сервера."
+      "_comment": [
+        "Поставляется только исполняемым файлом cadesplugin.exe, MSI у плагина нет.",
+        "Ключ тихой установки /s из документации подтвердить не удалось —",
+        "проверьте на тестовой машине. Если установщик откроет окно и будет ждать,",
+        "шаг снимется по timeoutSeconds и остальная настройка продолжится.",
+        "Ставить после КриптоПро CSP — порядок в этом списке соблюдается."
+      ],
+      "timeoutSeconds": 600
     },
     {
       "name": "Сертификаты УЦ СКБ Контур",

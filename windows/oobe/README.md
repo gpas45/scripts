@@ -140,6 +140,9 @@ powershell -c "iex ((irm https://raw.githubusercontent.com/gpas45/scripts/main/w
 ```
 https://oobe.dioservice.ru/deploy/
 ├─ 7-Zip\7z-x64.msi
+├─ WinRAR\
+│  ├─ winrar-x64.exe
+│  └─ rarreg.key
 ├─ AdobeReader\AcroRdrDCx64.exe
 ├─ NotepadPlusPlus\npp-x64.exe
 ├─ Chrome\GoogleChromeStandaloneEnterprise64.msi
@@ -148,8 +151,8 @@ https://oobe.dioservice.ru/deploy/
 ├─ Far\Far-x64.msi
 ├─ Aspia\aspia-host-x86_64.msi
 ├─ CryptoPro\
-│  ├─ cprocsp-pki-cades-x64.msi
-│  └─ CSP\csp-x64-kc1.msi
+│  ├─ cadesplugin.exe
+│  └─ CSP\csp-x64-rus.msi
 ├─ Kontur\Certificates_Kontur_Admin.exe
 ├─ Certificates\
 │  ├─ russian_trusted_root_ca.cer
@@ -291,7 +294,7 @@ powershell -ExecutionPolicy Bypass -File .\postinstall.ps1 -Profiles base,browse
 
 | Профиль | Что входит |
 |---|---|
-| `base` | **Набор по умолчанию:** 7-Zip, Notepad++, Adobe Reader, Chrome, Яндекс Браузер, КриптоПро CSP, КриптоПро ЭЦП plug-in, сертификаты УЦ СКБ Контур, Aspia Host + сертификаты Минцифры, все правки реестра, системные настройки |
+| `base` | **Набор по умолчанию:** 7-Zip, WinRAR, Notepad++, Adobe Reader, Chrome, Яндекс Браузер, КриптоПро CSP, КриптоПро ЭЦП plug-in, сертификаты УЦ СКБ Контур, Aspia Host + сертификаты Минцифры, все правки реестра, системные настройки |
 | `extra` | **Дополнительные пакеты:** VLC, Far Manager — по умолчанию не ставятся |
 | `browser` | Chrome, Яндекс Браузер — для точечного прогона |
 | `crypto` | КриптоПро CSP, КриптоПро ЭЦП plug-in, сертификаты УЦ СКБ Контур — для точечного прогона |
@@ -335,7 +338,9 @@ powershell -ExecutionPolicy Bypass -File .\postinstall.ps1 -Profiles base,browse
 | Пакет | Где взять | Замечания |
 |---|---|---|
 | Яндекс Браузер для организаций | [личный кабинет корпоративного браузера](https://browser.yandex.ru/corp) | Ключи тихой установки у разных сборок отличаются |
-| КриптоПро CSP | cryptopro.ru по вашей лицензии | Имя MSI зависит от версии и варианта KC1/KC2 — сверьте `nasPath`. Лицензия вводится отдельно: `cpconfig.exe -license -set <серийный номер>` |
+| КриптоПро CSP | cryptopro.ru по вашей лицензии | Лицензия вводится отдельно: `cpconfig.exe -license -set <серийный номер>` |
+| КриптоПро ЭЦП Browser plug-in | там же | Только `cadesplugin.exe`, MSI у плагина нет. Ключ тихой установки `/s` проверьте на тестовой машине |
+| WinRAR | rarlab.com по вашей лицензии | Есть и в winget (`RARLab.WinRAR`), но тогда это будет пробная версия. Положите `rarreg.key` рядом с дистрибутивом на NAS |
 | Сертификаты УЦ СКБ Контур | личный кабинет Контура | `SKBKontur.InstallCertificates`, консольная утилита, сертификаты зашиты внутрь, требует прав администратора. Свои команды смотрите через `/?` |
 | Aspia Host | [github.com/dchapyshev/aspia/releases](https://github.com/dchapyshev/aspia/releases) | После установки хост нужно настроить (пароль/ID), иначе подключиться не получится |
 

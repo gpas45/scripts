@@ -709,7 +709,9 @@ function Install-FromFile {
         # Консольные установщики любят заканчивать «нажмите любую клавишу»
         # (это cmd-шный pause, он читает stdin). При автоматическом прогоне
         # нажимать некому, поэтому подсовываем пустой ввод — pause сразу
-        # получает конец файла и программа завершается.
+        # получает конец файла и программа завершается. Дочерние процессы
+        # наследуют этот же stdin, поэтому работает и для msiexec, который
+        # запускает что-то своё.
         $empty = Join-Path -Path $script:WorkDir -ChildPath 'empty.in'
         if (-not (Test-Path -LiteralPath $empty)) {
             New-Item -ItemType File -Path $empty -Force | Out-Null
@@ -836,7 +838,11 @@ function Install-Application {
     else {
         1800
     }
-    $stdinNull = [bool]($Item.PSObject.Properties['stdinNull'] -and $Item.stdinNull)
+    # Пустой stdin по умолчанию: установщики нередко заканчивают «нажмите
+    # любую клавишу», а при автоматическом прогоне нажимать некому. Процессам,
+    # которые stdin не читают, это ничем не мешает. Отключается stdinNull: false.
+    $stdinNull = $true
+    if ($Item.PSObject.Properties['stdinNull']) { $stdinNull = [bool]$Item.stdinNull }
 
     if (($source -eq 'auto' -or $source -eq 'nas') -and $Item.nasPath) {
         if (-not $nasReady) {

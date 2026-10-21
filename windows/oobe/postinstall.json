@@ -160,7 +160,7 @@
     },
     {
       "name": "Яндекс Браузер для организаций",
-      "source": "auto",
+      "source": "nas",
       "wingetId": "",
       "nasPath": "YandexBrowser/Yandex.msi",
       "installerArgs": "/qn /norestart",
@@ -180,9 +180,9 @@
     },
     {
       "name": "КриптоПро CSP",
-      "source": "auto",
+      "source": "nas",
       "wingetId": "",
-      "nasPath": "CryptoPro/CSP/csp-x64-rus.msi",
+      "nasPath": "CryptoPro/csp-x64-rus.msi",
       "installerArgs": "/qn /norestart",
       "installerUrl": "",
       "checksums": {
@@ -209,7 +209,7 @@
     },
     {
       "name": "КриптоПро ЭЦП Browser plug-in",
-      "source": "auto",
+      "source": "nas",
       "wingetId": "",
       "nasPath": "CryptoPro/cadesplugin.exe",
       "installerArgs": "/s",
@@ -229,7 +229,7 @@
     },
     {
       "name": "Сертификаты УЦ СКБ Контур",
-      "source": "auto",
+      "source": "nas",
       "wingetId": "",
       "nasPath": "Kontur/Certificates_Kontur_Admin.exe",
       "installerArgs": "",
@@ -256,11 +256,18 @@
     },
     {
       "name": "Aspia Host",
-      "source": "auto",
+      "source": "nas",
       "wingetId": "",
       "nasPath": "Aspia/aspia-host-x86_64.msi",
       "installerArgs": "/qn /norestart",
       "installerUrl": "",
+      "configFiles": [
+        {
+          "nasPath": "Aspia/host.ini",
+          "destination": "%ProgramData%\\aspia\\host.ini"
+        }
+      ],
+      "restartService": "",
       "timeoutSeconds": 600,
       "profiles": [
         "base",
@@ -268,8 +275,16 @@
       ],
       "_comment": [
         "Сборки: https://github.com/dchapyshev/aspia/releases — положите MSI на NAS.",
-        "После установки хост настраивается отдельно (пароль/ID), иначе",
-        "подключиться к машине не получится."
+        "Установщик не подхватывает конфиг из своей папки: Aspia читает настройки",
+        "оттуда, куда их кладёт Qt. Хост работает службой и держит системные",
+        "настройки в QSettings (IniFormat, SystemScope, организация aspia,",
+        "приложение host), то есть в %ProgramData%\\aspia\\host.ini.",
+        "Поэтому конфиг копируется явно через configFiles — положите host.ini",
+        "рядом с дистрибутивом на NAS.",
+        "Если у вашей сборки файл называется иначе, поправьте nasPath и destination.",
+        "restartService: имя службы Aspia, чтобы перечитала настройки. Узнать:",
+        "Get-Service *aspia* | Select-Object Name, DisplayName",
+        "Пароль и ID хоста настраиваются отдельно, установщик их не задаёт."
       ]
     },
     {

@@ -721,6 +721,43 @@ function Install-FromFile {
     if ($code -ne 0) { throw "установщик вернул код $code." }
 }
 
+function Copy-ApplicationConfig {
+    param(
+        $Item,
+        $Nas
+    )
+    if (-not $Item.PSObject.Properties['configFiles'] -or -not $Item.configFiles) { return }
+
+    foreach ($entry in $Item.configFiles) {
+        if (-not $entry.nasPath -or -not $entry.destination) { continue }
+
+        $source = Get-NasFile -Nas $Nas -RelativePath $entry.nasPath
+        if (-not $source) {
+            Write-Warning "  конфиг $($entry.nasPath) на источнике не найден — пропускаю."
+            continue
+        }
+
+        $destination = [Environment]::ExpandEnvironmentVariables($entry.destination)
+        $directory = Split-Path -Parent $destination
+        if ($directory -and -not (Test-Path -LiteralPath $directory)) {
+            New-Item -ItemType Directory -Force -Path $directory | Out-Null
+        }
+        Copy-Item -LiteralPath $source -Destination $destination -Force
+        Write-Host "  конфиг положен в $destination"
+    }
+
+    if ($Item.PSObject.Properties['restartService'] -and $Item.restartService) {
+        $service = Get-Service -Name $Item.restartService -ErrorAction SilentlyContinue
+        if (-not $service) {
+            Write-Warning "  служба $($Item.restartService) не найдена — настройки подхватятся после перезагрузки."
+        }
+        else {
+            Restart-Service -Name $Item.restartService -Force -ErrorAction Stop
+            Write-Host "  служба $($Item.restartService) перезапущена"
+        }
+    }
+}
+
 function Install-Application {
     param(
         $Item,
@@ -735,19 +772,31 @@ function Install-Application {
         1800
     }
 
-    if (($source -eq 'auto' -or $source -eq 'nas') -and $nasReady -and $Item.nasPath) {
-        $file = Get-NasFile -Nas $Nas -RelativePath $Item.nasPath
-        if ($file) {
-            Test-FileChecksum -Path $file -Checksums $Item.checksums
-            Install-FromFile -Path $file -Arguments $Item.installerArgs -TimeoutSeconds $timeout
-            return
+    if (($source -eq 'auto' -or $source -eq 'nas') -and $Item.nasPath) {
+        if (-not $nasReady) {
+            if ($source -eq 'nas') {
+                throw "пакет ставится только с источника дистрибутивов, а он недоступен (нужен $($Item.nasPath))."
+            }
+            Write-Host '  источник дистрибутивов недоступен — пробую следующий.'
         }
-        if ($source -eq 'nas') { throw "на NAS нет файла $($Item.nasPath)." }
-        Write-Host "  на NAS нет $($Item.nasPath) — пробую следующий источник."
+        else {
+            $file = Get-NasFile -Nas $Nas -RelativePath $Item.nasPath
+            if ($file) {
+                Test-FileChecksum -Path $file -Checksums $Item.checksums
+                Install-FromFile -Path $file -Arguments $Item.installerArgs -TimeoutSeconds $timeout
+                Copy-ApplicationConfig -Item $Item -Nas $Nas
+                return
+            }
+            if ($source -eq 'nas') {
+                throw "на источнике нет файла $($Item.nasPath), а другого источника у этого пакета быть не может — положите дистрибутив на место."
+            }
+            Write-Host "  на источнике нет $($Item.nasPath) — пробую следующий источник."
+        }
     }
 
     if (($source -eq 'auto' -or $source -eq 'winget') -and $Item.wingetId) {
         Install-WithWinget -Id $Item.wingetId
+        Copy-ApplicationConfig -Item $Item -Nas $Nas
         return
     }
 
@@ -757,10 +806,17 @@ function Install-Application {
         Invoke-WebRequest -Uri $Item.installerUrl -OutFile $dest -UseBasicParsing
         Test-FileChecksum -Path $dest -Checksums $Item.checksums
         Install-FromFile -Path $dest -Arguments $Item.installerArgs -TimeoutSeconds $timeout
+        Copy-ApplicationConfig -Item $Item -Nas $Nas
         return
     }
 
-    throw 'не задан ни один источник (nasPath / wingetId / installerUrl).'
+    # Сюда попадаем, когда у пакета вообще нечему сработать: расписываем, что есть.
+    $have = @()
+    if ($Item.nasPath) { $have += "nasPath=$($Item.nasPath)" }
+    if ($Item.wingetId) { $have += "wingetId=$($Item.wingetId)" }
+    if ($Item.installerUrl) { $have += 'installerUrl задан' }
+    $detail = if ($have.Count -gt 0) { " Задано: $($have -join ', '); при source=$source это не используется." } else { '' }
+    throw "нет подходящего источника при source=$source.$detail"
 }
 
 function Install-Office {

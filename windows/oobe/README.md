@@ -135,6 +135,11 @@ powershell -c "iex ((irm https://raw.githubusercontent.com/gpas45/scripts/main/w
 `postinstall.ps1` берёт установщики в порядке **NAS → winget → прямая ссылка**
 (поле `source` у каждого пакета: `auto`, `nas`, `winget`, `url`).
 
+У Яндекс Браузера, КриптоПро CSP и плагина, сертификатов Контура и Aspia Host
+стоит `source: "nas"` — другого источника у них не бывает. Если файла на месте
+нет, такой пакет не подменяется ничем, а сообщает, какого именно файла не
+хватает, вместо туманного «не задан ни один источник».
+
 ### Старый winget в образе
 
 Набор ключей winget отличается от версии к версии, поэтому скрипт определяет её
@@ -169,10 +174,12 @@ https://oobe.dioservice.ru/deploy/
 ├─ VLC\vlc-win64.exe
 ├─ YandexBrowser\Yandex.msi
 ├─ Far\Far-x64.msi
-├─ Aspia\aspia-host-x86_64.msi
+├─ Aspia\
+│  ├─ aspia-host-x86_64.msi
+│  └─ host.ini
 ├─ CryptoPro\
 │  ├─ cadesplugin.exe
-│  └─ CSP\csp-x64-rus.msi
+│  └─ csp-x64-rus.msi
 ├─ Kontur\Certificates_Kontur_Admin.exe
 ├─ Certificates\
 │  ├─ Russian_Trusted_Root_CA.cer
@@ -392,6 +399,30 @@ MD5**, а ГОСТ подтвердится при повторном прого
 Поведение строгое: если задана хотя бы одна сумма, но проверить не удалось ни
 одной, пакет не ставится. Пустой блок или его отсутствие означают, что проверять
 нечего.
+
+#### Конфигурационные файлы после установки
+
+Установщики не подхватывают конфиги, лежащие рядом с ними, — файл нужно
+положить туда, где его читает сама программа. Для этого у пакета есть
+`configFiles` и `restartService`:
+
+```json
+"configFiles": [
+  { "nasPath": "Aspia/host.ini", "destination": "%ProgramData%\\aspia\\host.ini" }
+],
+"restartService": ""
+```
+
+Файл берётся с того же источника, что и дистрибутив, каталог назначения
+создаётся при необходимости, переменные вида `%ProgramData%` раскрываются.
+Если указано имя службы, она перезапускается, чтобы перечитать настройки;
+имя можно узнать через `Get-Service *aspia* | Select-Object Name, DisplayName`.
+
+Для Aspia Host путь взят из исходников: хост работает службой и хранит
+системные настройки через `QSettings` (`IniFormat`, `SystemScope`, организация
+`aspia`, приложение `host`), что на Windows даёт
+`C:\ProgramData\aspia\host.ini`. Если у вашей сборки файл называется иначе,
+поправьте `nasPath` и `destination`.
 
 У каждого пакета можно задать `timeoutSeconds`: если установщик не завершился
 за это время (например, что-то спросил), процесс снимается, шаг помечается

@@ -33,8 +33,9 @@
     Для захвата эталонного образа нужен отдельный запуск с /generalize.
 
 .PARAMETER AnswerFileUri
-    URL файла ответов. По умолчанию — паста, на которую ссылается статья-источник.
-    Надёжнее указать raw-ссылку на коммит этого репозитория (см. README).
+    URL файла ответов. По умолчанию — UnattendOOBE.xml из этого репозитория.
+    Для серийного развёртывания укажите ссылку на конкретный коммит и сверяйте
+    хеш ключом -Sha256 (см. README).
 
 .PARAMETER Sha256
     Ожидаемый SHA256 файла ответов. Если задан, расхождение прерывает работу.
@@ -86,7 +87,7 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$AnswerFileUri = 'https://pastebin.com/raw/aiLyKTXQ',
+    [string]$AnswerFileUri = 'https://raw.githubusercontent.com/gpas45/scripts/main/windows/oobe/UnattendOOBE.xml',
     [string]$Sha256,
     [string]$Path = (Join-Path -Path $env:TEMP -ChildPath 'UnattendOOBE.xml'),
     [string]$PostInstallBaseUri = 'https://raw.githubusercontent.com/gpas45/scripts/main/windows/oobe',
@@ -282,21 +283,39 @@ namespace Api
 '@
 }
 
+# OOBEComplete — это Win32 BOOL, а не HRESULT: ненулевой возврат означает, что
+# вызов УДАЛСЯ, а ответ лежит в параметре. Ноль — вызов не удался.
 $isOOBEComplete = 0
-$hr = [Api.Kernel32]::OOBEComplete([ref] $isOOBEComplete)
+$callSucceeded = [Api.Kernel32]::OOBEComplete([ref] $isOOBEComplete)
 
-if ($hr -ne 0) {
-    # HRESULT проигнорировать нельзя: иначе при сбое API мы запустим sysprep
-    # на рабочей машине и выбросим её в OOBE.
-    $message = "OOBEComplete вернула HRESULT 0x{0:X8} — определить этап установки не удалось." -f $hr
-    if (-not $Force) {
-        throw "$message Повторите с -Force, если уверены, что это OOBE."
-    }
-    Write-Warning "$message Продолжаем, так как задан -Force."
+# Независимые от API признаки: пока идёт установка, эти значения в реестре
+# равны 1, а учётная запись defaultuser0 существует только на этапе OOBE.
+# Нужны, чтобы не запустить sysprep на рабочей машине и, наоборот, не встать
+# посреди OOBE, если API ответит не то.
+$looksLikeOobe = ($env:USERNAME -eq 'defaultuser0')
+foreach ($name in @('OOBEInProgress', 'SystemSetupInProgress')) {
+    $value = (Get-ItemProperty -LiteralPath 'HKLM:\SYSTEM\Setup' -Name $name -ErrorAction SilentlyContinue).$name
+    if ($value) { $looksLikeOobe = $true }
 }
-elseif ($isOOBEComplete -ne 0) {
+
+if ($callSucceeded -ne 0 -and $isOOBEComplete -ne 0 -and -not $looksLikeOobe) {
     Write-Host 'OOBE уже завершён — делать нечего.'
     exit 0
+}
+if ($callSucceeded -ne 0 -and $isOOBEComplete -ne 0) {
+    Write-Warning 'OOBEComplete считает OOBE завершённым, но система говорит обратное — продолжаю.'
+}
+if ($callSucceeded -eq 0) {
+    if ($looksLikeOobe) {
+        Write-Warning 'OOBEComplete не отработала, но по состоянию системы установка ещё идёт — продолжаю.'
+    }
+    else {
+        $message = 'Определить этап установки не удалось: OOBEComplete не отработала, признаков OOBE в системе нет.'
+        if (-not $Force) {
+            throw "$message Повторите с -Force, если уверены, что это OOBE."
+        }
+        Write-Warning "$message Продолжаем, так как задан -Force."
+    }
 }
 
 # --- 2. Скачивание и проверка файла ответов ----------------------------------
@@ -311,8 +330,8 @@ catch {
 
 Write-Host "Скачиваю файл ответов: $AnswerFileUri"
 # Invoke-WebRequest + .Content, а не (Invoke-RestMethod).OuterXml: последний
-# отдаёт XmlDocument только при «правильном» Content-Type, а pastebin присылает
-# text/plain (и может вместо файла вернуть страницу с ошибкой или капчей).
+# отдаёт XmlDocument только при «правильном» Content-Type, а raw-раздачи
+# присылают text/plain (и могут вместо файла вернуть страницу с ошибкой).
 $answerXml = (Invoke-WebRequest -Uri $AnswerFileUri -UseBasicParsing).Content
 if ($answerXml -is [byte[]]) {
     $answerXml = [Text.Encoding]::UTF8.GetString($answerXml)

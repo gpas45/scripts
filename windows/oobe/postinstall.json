@@ -128,8 +128,8 @@
       "name": "Notepad++",
       "source": "auto",
       "wingetId": "Notepad++.Notepad++",
-      "nasPath": "NotepadPlusPlus/npp-x64.exe",
-      "installerArgs": "/S",
+      "nasPath": "NotepadPlusPlus/npp-x64.msi",
+      "installerArgs": "/qn /norestart",
       "installerUrl": "",
       "profiles": [
         "base"

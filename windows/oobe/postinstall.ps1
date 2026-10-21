@@ -97,6 +97,7 @@ $script:Failures = New-Object 'System.Collections.Generic.List[string]'
 $script:WorkDir = Join-Path -Path $env:TEMP -ChildPath 'oobe-postinstall'
 $script:Winget = $null
 $script:NasHttpHeaders = $null
+$script:WingetVersion = $null
 $script:RebootRequired = $false
 
 New-Item -ItemType Directory -Force -Path $script:WorkDir | Out-Null
@@ -566,6 +567,28 @@ function Initialize-Winget {
     return (Get-WingetPath -TimeoutSeconds 30)
 }
 
+function Get-WingetVersion {
+    if ($script:WingetVersion) { return $script:WingetVersion }
+
+    $script:WingetVersion = [version]'0.0'
+    try {
+        $raw = (& $script:Winget '--version' 2>&1 | Out-String).Trim()
+        # Вывод вида v1.2.10691, у предварительных сборок с суффиксом (v1.6.3482-preview).
+        $match = [regex]::Match($raw, '(\d+(?:\.\d+){1,3})')
+        if ($match.Success) {
+            $script:WingetVersion = [version]$match.Value
+            Write-Host "  winget $raw"
+        }
+        else {
+            Write-Warning "  не разобрал версию winget из «$raw» — считаю её старой."
+        }
+    }
+    catch {
+        Write-Warning "  не удалось определить версию winget: $($_.Exception.Message)"
+    }
+    return $script:WingetVersion
+}
+
 function Install-WithWinget {
     param([string]$Id)
 
@@ -574,8 +597,15 @@ function Install-WithWinget {
 
     $common = @(
         'install', '--id', $Id, '--exact', '--source', 'winget', '--silent',
-        '--accept-package-agreements', '--accept-source-agreements', '--disable-interactivity'
+        '--accept-package-agreements', '--accept-source-agreements'
     )
+
+    # --disable-interactivity появился примерно в 1.4; в 1.2 (Server 2022, LTSC,
+    # образы без обновлённого App Installer) его нет, и winget падает на разборе
+    # аргументов. Тихий режим --silent интерактив и так подавляет.
+    if ((Get-WingetVersion) -ge [version]'1.4') {
+        $common += '--disable-interactivity'
+    }
 
     $withScope = $common + @('--scope', 'machine')
     & $script:Winget @withScope 2>&1 | Write-Host

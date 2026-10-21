@@ -135,6 +135,26 @@ powershell -c "iex ((irm https://raw.githubusercontent.com/gpas45/scripts/main/w
 `postinstall.ps1` берёт установщики в порядке **NAS → winget → прямая ссылка**
 (поле `source` у каждого пакета: `auto`, `nas`, `winget`, `url`).
 
+### Старый winget в образе
+
+Набор ключей winget отличается от версии к версии, поэтому скрипт определяет её
+через `winget --version` и подставляет флаги по ней. Конкретно
+`--disable-interactivity` появился примерно в 1.4: в 1.2 (Windows Server 2022,
+LTSC, образы без обновлённого App Installer) его нет, и winget падает на разборе
+аргументов, не дойдя до установки. На таких версиях флаг не добавляется —
+тихого режима `--silent` достаточно.
+
+Если winget в образе старый, лучше обновить App Installer один раз, до sysprep,
+и дальше не думать об этом. Из Store на Server-редакциях он не ставится,
+поэтому `msixbundle` берётся из релизов
+[microsoft/winget-cli](https://github.com/microsoft/winget-cli/releases):
+
+```powershell
+Add-AppxProvisionedPackage -Online `
+  -PackagePath .\Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle `
+  -SkipLicense
+```
+
 Ожидаемая раскладка раздачи (пути задаются в `software[].nasPath`):
 
 ```
@@ -144,7 +164,7 @@ https://oobe.dioservice.ru/deploy/
 │  ├─ winrar-x64.exe
 │  └─ rarreg.key
 ├─ AdobeReader\AcroRdrDCx64.exe
-├─ NotepadPlusPlus\npp-x64.exe
+├─ NotepadPlusPlus\npp-x64.msi
 ├─ Chrome\GoogleChromeStandaloneEnterprise64.msi
 ├─ VLC\vlc-win64.exe
 ├─ YandexBrowser\Yandex.msi

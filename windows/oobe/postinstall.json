@@ -24,6 +24,45 @@
     "passwordFile": "nas.cred",
     "waitForNetworkSeconds": 120
   },
+  "certificates": {
+    "_comment": [
+      "Доверенные корневые и промежуточные сертификаты — прежде всего Минцифры",
+      "(Russian Trusted Root CA / Sub CA), без которых не открываются сайты",
+      "госуслуг, Сбербанка и части госорганов.",
+      "Файлы скачайте ОДИН раз с официальной страницы https://www.gosuslugi.ru/crt,",
+      "сверьте отпечаток и положите на NAS: тянуть корневой сертификат на каждой",
+      "машине с внешнего адреса не нужно и небезопасно.",
+      "store: Root — доверенные корневые ЦС, CA — промежуточные.",
+      "thumbprint (SHA1, пробелы и двоеточия можно не убирать): если задан,",
+      "сертификат с другим отпечатком не установится. Для корневого ЦС заполнить",
+      "настоятельно рекомендуется — такой сертификат позволяет выпускать",
+      "сертификаты, которым машина будет доверять для любого сайта.",
+      "Узнать отпечаток: (Get-PfxCertificate .\\файл.cer).Thumbprint"
+    ],
+    "enabled": true,
+    "items": [
+      {
+        "name": "Russian Trusted Root CA (Минцифры)",
+        "nasPath": "Certificates/russian_trusted_root_ca.cer",
+        "url": "",
+        "store": "Root",
+        "thumbprint": "",
+        "profiles": [
+          "base"
+        ]
+      },
+      {
+        "name": "Russian Trusted Sub CA (Минцифры)",
+        "nasPath": "Certificates/russian_trusted_sub_ca.cer",
+        "url": "",
+        "store": "CA",
+        "thumbprint": "",
+        "profiles": [
+          "base"
+        ]
+      }
+    ]
+  },
   "software": [
     {
       "name": "7-Zip",
@@ -81,6 +120,25 @@
       ]
     },
     {
+      "name": "Яндекс Браузер для организаций",
+      "source": "auto",
+      "wingetId": "",
+      "nasPath": "YandexBrowser/Yandex.msi",
+      "installerArgs": "/qn /norestart",
+      "installerUrl": "",
+      "profiles": [
+        "browser"
+      ],
+      "_comment": [
+        "Корпоративной сборки нет в winget — только MSI. Скачайте его в личном",
+        "кабинете корпоративного браузера (https://browser.yandex.ru/corp), при",
+        "необходимости соберите с нужной конфигурацией и положите на NAS.",
+        "Развёртывание: https://browser.yandex.ru/support/browser-corporate/ru/deployment/windows/deployment",
+        "Ключи тихой установки у разных сборок отличаются — проверьте на тестовой",
+        "машине. Каталог профиля задаётся параметром USER_DATA_DIR."
+      ]
+    },
+    {
       "name": "VLC",
       "source": "auto",
       "wingetId": "VideoLAN.VLC",
@@ -89,7 +147,8 @@
       "installerUrl": "",
       "profiles": [
         "extra"
-      ]
+      ],
+      "_comment": "Опционально: ставится только при -Profiles ...,extra, в базовый набор не входит."
     },
     {
       "name": "Far Manager",
@@ -100,17 +159,6 @@
       "installerUrl": "",
       "profiles": [
         "extra"
-      ]
-    },
-    {
-      "name": "AnyDesk",
-      "source": "auto",
-      "wingetId": "AnyDeskSoftwareGmbH.AnyDesk",
-      "nasPath": "AnyDesk/AnyDesk.exe",
-      "installerArgs": "--install \"C:\\Program Files (x86)\\AnyDesk\" --start-with-win --silent",
-      "installerUrl": "",
-      "profiles": [
-        "remote"
       ]
     },
     {

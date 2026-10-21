@@ -11,10 +11,11 @@
     Что делает (всё описано данными в postinstall.json, а не в коде):
       1. ждёт поднятия сети;
       2. подключается к Synology NAS (SMB или HTTP) — основной источник дистрибутивов;
-      3. ставит ПО: NAS -> winget -> прямая ссылка (порядок задаётся software.source);
-      4. при office.enabled ставит Office через ODT или winget;
-      5. применяет правки реестра;
-      6. применяет системные настройки (часовой пояс, электропитание, RDP, имя ПК).
+      3. ставит доверенные сертификаты (Минцифры и прочие) с проверкой отпечатка;
+      4. ставит ПО: NAS -> winget -> прямая ссылка (порядок задаётся software.source);
+      5. при office.enabled ставит Office через ODT или winget;
+      6. применяет правки реестра;
+      7. применяет системные настройки (часовой пояс, электропитание, RDP, имя ПК).
 
     Ошибка на отдельном пакете не прерывает работу: в конце печатается сводка,
     код возврата 1, если что-то не установилось. Повторный запуск безопасен.
@@ -44,6 +45,7 @@ param(
     [string]$NasShare,
     [string]$NasUser,
     [string]$NasPassword,
+    [switch]$SkipCertificates,
     [switch]$SkipSoftware,
     [switch]$SkipOffice,
     [switch]$SkipRegistry,
@@ -228,6 +230,52 @@ function Get-NasFile {
     }
     Copy-Item -LiteralPath $src -Destination $dest -Force
     return $dest
+}
+
+# --- Доверенные сертификаты --------------------------------------------------
+
+function Import-TrustedCertificate {
+    param(
+        $Item,
+        $Nas
+    )
+    $nasReady = ($Nas -and $Nas.enabled)
+
+    $file = $null
+    if ($nasReady -and $Item.nasPath) {
+        $file = Get-NasFile -Nas $Nas -RelativePath $Item.nasPath
+    }
+    if (-not $file -and $Item.url) {
+        $file = Join-Path -Path $script:WorkDir -ChildPath (Split-Path -Leaf ([uri]$Item.url).LocalPath)
+        Invoke-WebRequest -Uri $Item.url -OutFile $file -UseBasicParsing
+    }
+    if (-not $file) { throw 'файл сертификата не найден (ни nasPath, ни url).' }
+
+    $cert = New-Object Security.Cryptography.X509Certificates.X509Certificate2 -ArgumentList $file
+    $thumbprint = $cert.Thumbprint
+
+    if ($Item.thumbprint) {
+        $expected = ($Item.thumbprint -replace '[\s:]', '').ToUpperInvariant()
+        if ($thumbprint -ne $expected) {
+            throw "отпечаток не совпал: ожидался $expected, у файла $thumbprint."
+        }
+    }
+    else {
+        Write-Warning "  отпечаток в конфиге не задан — ставлю $thumbprint без проверки."
+    }
+
+    $store = if ($Item.store) { $Item.store } else { 'Root' }
+    $location = "Cert:\LocalMachine\$store"
+
+    $existing = Get-ChildItem -Path $location -ErrorAction SilentlyContinue |
+        Where-Object { $_.Thumbprint -eq $thumbprint }
+    if ($existing) {
+        Write-Host "  уже в $location ($thumbprint)."
+        return
+    }
+
+    Import-Certificate -FilePath $file -CertStoreLocation $location -ErrorAction Stop | Out-Null
+    Write-Host "  установлен в $location ($thumbprint), выдан: $($cert.Subject)"
 }
 
 # --- Установка ПО ------------------------------------------------------------
@@ -515,6 +563,17 @@ if ($nas -and $nas.enabled) {
     $timeout = if ($nas.PSObject.Properties['waitForNetworkSeconds']) { [int]$nas.waitForNetworkSeconds } else { 120 }
     Wait-Network -TimeoutSeconds $timeout
     Invoke-Safely -Label "подключение к NAS ($($nas.type))" -Action { Connect-NasShare -Nas $nas }
+}
+
+# Сертификаты ставим до ПО: без корневого ЦС может не открыться HTTPS
+# внутренних серверов, откуда идут дистрибутивы.
+if (-not $SkipCertificates -and $config.PSObject.Properties['certificates'] -and $config.certificates.enabled) {
+    Write-Step 'Доверенные сертификаты'
+    foreach ($item in $config.certificates.items) {
+        if (-not (Test-ProfileMatch -Item $item)) { continue }
+        Write-Host "- $($item.name)"
+        Invoke-Safely -Label $item.name -Action { Import-TrustedCertificate -Item $item -Nas $nas }
+    }
 }
 
 if (-not $SkipSoftware -and $config.PSObject.Properties['software']) {

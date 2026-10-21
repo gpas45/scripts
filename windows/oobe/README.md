@@ -76,9 +76,12 @@ powershell -c "iex ((irm https://raw.githubusercontent.com/gpas45/scripts/main/w
 ├─ Chrome\GoogleChromeStandaloneEnterprise64.msi
 ├─ Firefox\FirefoxSetup-x64.msi
 ├─ VLC\vlc-win64.exe
+├─ YandexBrowser\Yandex.msi
 ├─ Far\Far-x64.msi
-├─ AnyDesk\AnyDesk.exe
 ├─ CryptoPro\cprocsp-pki-cades-x64.msi
+├─ Certificates\
+│  ├─ russian_trusted_root_ca.cer
+│  └─ russian_trusted_sub_ca.cer
 └─ Office\ODT\
    ├─ setup.exe
    └─ configuration-ProPlus2021Volume.xml
@@ -122,9 +125,18 @@ powershell -ExecutionPolicy Bypass -File .\postinstall.ps1
 powershell -ExecutionPolicy Bypass -File .\postinstall.ps1 -Profiles base,browser,extra
 ```
 
-Готовые профили: `base` (7-Zip, Adobe Reader, Notepad++ и все правки реестра),
-`browser` (Chrome, Firefox), `extra` (VLC, Far), `remote` (AnyDesk),
-`crypto` (КриптоПро — заполните `nasPath`/`installerUrl` своим дистрибутивом).
+| Профиль | Что входит |
+|---|---|
+| `base` | 7-Zip, Adobe Reader, Notepad++, сертификаты Минцифры, все правки реестра, системные настройки |
+| `browser` | Chrome, Firefox, Яндекс Браузер для организаций |
+| `extra` | VLC, Far Manager — опционально, в базовый набор не входят |
+| `crypto` | КриптоПро ЭЦП Browser plug-in — заполните `nasPath`/`installerUrl` своим дистрибутивом |
+
+Яндекс Браузер для организаций в winget не публикуется — только MSI. Скачайте
+его в [личном кабинете корпоративного браузера](https://browser.yandex.ru/corp),
+при необходимости соберите с нужной конфигурацией и положите на NAS как
+`YandexBrowser\Yandex.msi`. Ключи тихой установки у разных сборок отличаются —
+проверьте на тестовой машине ([документация по развёртыванию](https://browser.yandex.ru/support/browser-corporate/ru/deployment/windows/deployment)).
 
 Добавить свой пакет — одна запись в `software`:
 
@@ -143,6 +155,36 @@ powershell -ExecutionPolicy Bypass -File .\postinstall.ps1 -Profiles base,browse
 `.msi` ставится через `msiexec /i … /qn /norestart`, `.ps1` — через
 PowerShell, всё остальное запускается напрямую с `installerArgs`.
 Коды возврата `3010`/`1641` трактуются как «нужна перезагрузка», а не как ошибка.
+
+### Доверенные сертификаты
+
+Секция `certificates` ставит корневые и промежуточные сертификаты — прежде всего
+Минцифры (Russian Trusted Root CA / Sub CA), без которых не открываются сайты
+госуслуг, Сбербанка и части госорганов.
+
+| Поле | Назначение |
+|---|---|
+| `nasPath` | Файл на NAS — основной источник |
+| `url` | Резервная прямая ссылка, если на NAS файла нет |
+| `store` | `Root` — доверенные корневые ЦС, `CA` — промежуточные |
+| `thumbprint` | Ожидаемый отпечаток SHA1; при несовпадении сертификат не ставится |
+
+Файлы скачайте **один раз** с официальной страницы <https://www.gosuslugi.ru/crt>,
+сверьте отпечаток и положите на NAS. Тянуть корневой сертификат на каждой машине
+с внешнего адреса не нужно: установленный корневой ЦС позволяет выпускать
+сертификаты, которым машина будет доверять для любого сайта, поэтому источник
+должен быть проверенным, а `thumbprint` — заполненным. Если `thumbprint` пустой,
+скрипт установит сертификат, но напишет предупреждение с фактическим отпечатком.
+
+Узнать отпечаток файла:
+
+```powershell
+(Get-PfxCertificate .\russian_trusted_root_ca.cer).Thumbprint
+```
+
+Сертификаты ставятся до установки ПО — иначе HTTPS внутренних серверов, откуда
+идут дистрибутивы, может не открыться. Уже установленный сертификат
+пропускается, так что повторный запуск безопасен.
 
 ### Правки реестра
 

@@ -186,7 +186,7 @@
       "installerArgs": "/qn /norestart",
       "installerUrl": "",
       "checksums": {
-        "md5": "326921d3551f371fcb2dccb7f183fcc4",
+        "md5": "326921D3551F371FCB2DCCB7F183FCC4",
         "sha256": "",
         "gost2012_256": "C148910DDD1143E10F4BE68AD048F5738CB359DABE2C28735486F5546E6B41BC"
       },

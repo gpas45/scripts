@@ -37,10 +37,10 @@ powershell -ExecutionPolicy Bypass -File $env:TEMP\oobe.ps1
 
 ```
 ================ План установки ================
-  Источник ПО      : https://nas.dioservice.ru/install (HTTP)
+  Источник ПО      : https://install.dioservice.ru/install (HTTP)
   Учётная запись   : deploy
   Пароль           : задан
-  Доступ к раздаче : ОК — HTTP 200, https://nas.dioservice.ru/install/7-Zip/7z-x64.msi
+  Доступ к раздаче : ОК — HTTP 200, https://install.dioservice.ru/install/7-Zip/7z-x64.msi
   Программы        : 9
       - 7-Zip
       - Notepad++
@@ -101,7 +101,7 @@ powershell -ExecutionPolicy Bypass -File $env:TEMP\oobe.ps1
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File $env:TEMP\oobe.ps1 -NoPrompt `
-    -NasBaseUrl https://nas.dioservice.ru/install -NasUser deploy -NasPassword 'пароль'
+    -NasBaseUrl https://install.dioservice.ru/install -NasUser deploy -NasPassword 'пароль'
 ```
 
 Короткий вариант «в одну команду» из статьи-источника тоже работает, но
@@ -138,7 +138,7 @@ powershell -c "iex ((irm https://raw.githubusercontent.com/gpas45/scripts/main/w
 Ожидаемая раскладка раздачи (пути задаются в `software[].nasPath`):
 
 ```
-https://nas.dioservice.ru/install/
+https://install.dioservice.ru/install/
 ├─ 7-Zip\7z-x64.msi
 ├─ AdobeReader\AcroRdrDCx64.exe
 ├─ NotepadPlusPlus\npp-x64.exe
@@ -165,7 +165,11 @@ https://nas.dioservice.ru/install/
 ### Вариант по умолчанию: HTTPS (`"type": "http"`)
 
 Установка идёт за пределами локальной сети, поэтому по умолчанию дистрибутивы
-забираются по HTTPS с `https://nas.dioservice.ru/install`.
+забираются по HTTPS с `https://install.dioservice.ru/install`.
+
+Имя у HTTPS-раздачи отдельное, и это намеренно: `nas.dioservice.ru` остаётся за
+интерфейсом DSM и SMB (внутри сети оно резолвится прямо в NAS), а
+`install.dioservice.ru` ведёт на обратный прокси, который отдаёт WebDAV.
 
 На Synology: раздайте папку `install` через **Web Station** (или File Station) и
 выпустите сертификат Let's Encrypt средствами DSM. Если сертификат

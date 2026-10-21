@@ -367,6 +367,82 @@ function Disconnect-NasShare {
     catch { & net.exe use $script:NasSharePath /delete /y 2>&1 | Out-Null }
 }
 
+function Test-NasAccess {
+    param(
+        $Nas,
+        [string]$ProbePath
+    )
+    # Ok      — источник отвечает и аутентификация пройдена
+    # Caveat  — доступ есть, но пробный файл не найден (раскладка/путь)
+    $result = @{ Ok = $false; Caveat = $false; Message = '' }
+
+    if ($Nas.type -eq 'smb') {
+        $path = $script:NasSharePath
+        try {
+            if (-not (Test-Path -LiteralPath $path)) {
+                $result.Message = "папка $path недоступна"
+                return $result
+            }
+            $result.Ok = $true
+            $result.Message = "папка $path доступна"
+            if ($ProbePath) {
+                $probe = Join-Path -Path $path -ChildPath ($ProbePath -replace '/', '\')
+                if (-not (Test-Path -LiteralPath $probe)) {
+                    $result.Caveat = $true
+                    $result.Message = "папка $path доступна, но файла $ProbePath в ней нет"
+                }
+            }
+        }
+        catch {
+            $result.Message = "$path — $($_.Exception.Message)"
+        }
+        return $result
+    }
+
+    $base = $Nas.baseUrl.TrimEnd('/')
+    $url = if ($ProbePath) { '{0}/{1}' -f $base, ($ProbePath -replace '\\', '/') } else { "$base/" }
+
+    foreach ($method in @('Head', 'Get')) {
+        $request = @{ Uri = $url; Method = $method; UseBasicParsing = $true; TimeoutSec = 30 }
+        if ($script:NasHttpHeaders) { $request['Headers'] = $script:NasHttpHeaders }
+        try {
+            $response = Invoke-WebRequest @request
+            $result.Ok = $true
+            $result.Message = "HTTP $([int]$response.StatusCode), $url"
+            return $result
+        }
+        catch {
+            $status = 0
+            if ($_.Exception.Response) { $status = [int]$_.Exception.Response.StatusCode }
+
+            if ($status -eq 405 -and $method -eq 'Head') { continue }
+
+            if ($status -eq 0) {
+                $result.Message = "$base недоступен — $($_.Exception.Message)"
+            }
+            elseif ($status -eq 401) {
+                $result.Message = "401 от $base — аутентификация не пройдена, проверьте учётную запись и пароль"
+            }
+            elseif ($status -eq 403) {
+                $result.Message = "403 от $base — доступ запрещён"
+            }
+            elseif ($status -eq 404) {
+                # 404 вместо 401 означает, что аутентификацию мы прошли.
+                $result.Ok = $true
+                $result.Caveat = $true
+                $result.Message = "источник отвечает и аутентификация пройдена, но $url отдаёт 404 — проверьте раскладку файлов"
+            }
+            else {
+                $result.Message = "HTTP $status от $url"
+            }
+            return $result
+        }
+    }
+
+    if (-not $result.Message) { $result.Message = "$url — проверить не удалось" }
+    return $result
+}
+
 function Get-NasFile {
     param(
         $Nas,
@@ -761,11 +837,31 @@ if ($nas) {
 }
 $script:NasSharePath = if ($nas) { $nas.share } else { $null }
 
+$nasAccess = $null
 if ($nas -and $nas.enabled) {
-    Write-Step 'Сеть и NAS'
+    Write-Step 'Сеть и источник дистрибутивов'
     $timeout = if ($nas.PSObject.Properties['waitForNetworkSeconds']) { [int]$nas.waitForNetworkSeconds } else { 120 }
     Wait-Network -TimeoutSeconds $timeout
-    Invoke-Safely -Label "подключение к NAS ($($nas.type))" -Action { Connect-NasShare -Nas $nas }
+    Invoke-Safely -Label "подключение к источнику ($($nas.type))" -Action { Connect-NasShare -Nas $nas }
+
+    # Проверяем доступ и аутентификацию заранее: иначе каждый пакет будет
+    # отваливаться по таймауту поодиночке, а причина останется неясной.
+    $probe = @($config.software | Where-Object { $_.nasPath } | Select-Object -First 1).nasPath
+    $nasAccess = Test-NasAccess -Nas $nas -ProbePath $probe
+
+    if ($nasAccess.Ok -and -not $nasAccess.Caveat) {
+        Write-Host "  Проверка доступа: ОК — $($nasAccess.Message)" -ForegroundColor DarkGreen
+    }
+    elseif ($nasAccess.Ok) {
+        Write-Warning "  Проверка доступа: $($nasAccess.Message)"
+        $script:Failures.Add("доступ к источнику — $($nasAccess.Message)")
+    }
+    else {
+        Write-Warning "  Проверка доступа НЕ пройдена: $($nasAccess.Message)"
+        $script:Failures.Add("доступ к источнику — $($nasAccess.Message)")
+        $nas.enabled = $false
+        Write-Warning '  Источник отключён: ПО будет ставиться из winget и по прямым ссылкам.'
+    }
 }
 
 # --- План установки ---------------------------------------------------------
@@ -788,9 +884,15 @@ if ($nas -and $nas.enabled) {
     $source = if ($nas.type -eq 'smb') { $nas.share } else { $nas.baseUrl }
     $auth = if ($script:NasHttpHeaders -or $nas.user) { "учётная запись $($nas.user)" } else { 'без аутентификации' }
     Write-Host ("  Источник дистрибутивов : {0} ({1}, {2})" -f $source, $nas.type.ToUpperInvariant(), $auth)
+    $verdict = if (-not $nasAccess) { 'не проверялся' }
+        elseif ($nasAccess.Caveat) { "с оговоркой — $($nasAccess.Message)" }
+        else { "доступен — $($nasAccess.Message)" }
+    Write-Host ("  Проверка доступа       : {0}" -f $verdict)
 }
 else {
-    Write-Host '  Источник дистрибутивов : только winget и прямые ссылки'
+    $why = if ($nasAccess -and -not $nasAccess.Ok) { "недоступен: $($nasAccess.Message)" } else { 'выключен в конфиге' }
+    Write-Host ("  Источник дистрибутивов : {0}" -f $why)
+    Write-Host '                           ПО — только winget и прямые ссылки'
 }
 Write-Host ("  Профили                : {0}" -f ($Profiles -join ', '))
 Write-Host ("  Программ к установке   : {0}" -f $plannedSoftware.Count)

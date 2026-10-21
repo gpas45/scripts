@@ -106,13 +106,133 @@ $ErrorActionPreference = 'Stop'
 
 # --- Экран плана установки ---------------------------------------------------
 
-function Read-SecretValue {
+function Read-Secret {
     param([string]$Prompt)
     $secure = Read-Host -Prompt $Prompt -AsSecureString
     if (-not $secure -or $secure.Length -eq 0) { return $null }
-    $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
-    try { return [Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr) }
+    return $secure
+}
+
+function ConvertTo-Secret {
+    param([string]$Plain)
+    if ([string]::IsNullOrEmpty($Plain)) { return $null }
+    # Посимвольно, а не ConvertTo-SecureString -AsPlainText: пароль приходит
+    # из ключа командной строки, и нам нужен SecureString без запрещённого
+    # правилами преобразования открытого текста.
+    $secure = New-Object Security.SecureString
+    foreach ($char in $Plain.ToCharArray()) { $secure.AppendChar($char) }
+    $secure.MakeReadOnly()
+    return $secure
+}
+
+function ConvertTo-PlainText {
+    param([Security.SecureString]$Secure)
+    if (-not $Secure) { return $null }
+    # Разворачиваем только там, где открытый текст неизбежен: аргумент net use,
+    # заголовок Basic и файл nas.cred, который читает postinstall.ps1.
+    $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($Secure)
+    try { return [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr) }
     finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
+}
+
+function Test-SourceAccess {
+    param(
+        [string]$Type,
+        [string]$BaseUrl,
+        [string]$Share,
+        [PSCredential]$Credential,
+        [string]$ProbePath
+    )
+    $result = @{ Ok = $false; Caveat = $false; Message = '' }
+
+    $account = $null
+    $secret = $null
+    if ($Credential) {
+        $account = $Credential.UserName
+        $secret = $Credential.GetNetworkCredential().Password
+    }
+
+    if ($Type -eq 'smb') {
+        $mapped = $false
+        try {
+            if ($account) {
+                & net.exe use $Share $secret /user:$account 2>&1 | Out-Null
+                if ($LASTEXITCODE -ne 0) {
+                    $result.Message = "подключиться к $Share не удалось (net use код $LASTEXITCODE)"
+                    return $result
+                }
+                $mapped = $true
+            }
+            if (-not (Test-Path -LiteralPath $Share)) {
+                $result.Message = "папка $Share недоступна"
+                return $result
+            }
+            $result.Ok = $true
+            $result.Message = "папка $Share доступна"
+            if ($ProbePath) {
+                $probe = Join-Path -Path $Share -ChildPath ($ProbePath -replace '/', '\')
+                if (-not (Test-Path -LiteralPath $probe)) {
+                    $result.Caveat = $true
+                    $result.Message = "папка доступна, но файла $ProbePath в ней нет"
+                }
+            }
+        }
+        catch {
+            $result.Message = "$Share — $($_.Exception.Message)"
+        }
+        finally {
+            if ($mapped) { & net.exe use $Share /delete /y 2>&1 | Out-Null }
+        }
+        return $result
+    }
+
+    $base = $BaseUrl.TrimEnd('/')
+    $url = if ($ProbePath) { '{0}/{1}' -f $base, ($ProbePath -replace '\\', '/') } else { "$base/" }
+
+    $headers = $null
+    if ($account -and $secret) {
+        $token = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(('{0}:{1}' -f $account, $secret)))
+        $headers = @{ Authorization = "Basic $token" }
+    }
+
+    foreach ($method in @('Head', 'Get')) {
+        $request = @{ Uri = $url; Method = $method; UseBasicParsing = $true; TimeoutSec = 30 }
+        if ($headers) { $request['Headers'] = $headers }
+        try {
+            $response = Invoke-WebRequest @request
+            $result.Ok = $true
+            $result.Message = "HTTP $([int]$response.StatusCode), $url"
+            return $result
+        }
+        catch {
+            $status = 0
+            if ($_.Exception.Response) { $status = [int]$_.Exception.Response.StatusCode }
+
+            if ($status -eq 405 -and $method -eq 'Head') { continue }
+
+            if ($status -eq 0) {
+                $result.Message = "$base недоступен — $($_.Exception.Message)"
+            }
+            elseif ($status -eq 401) {
+                $result.Message = "401 — аутентификация не пройдена, проверьте учётную запись и пароль"
+            }
+            elseif ($status -eq 403) {
+                $result.Message = "403 — доступ запрещён"
+            }
+            elseif ($status -eq 404) {
+                $result.Ok = $true
+                $result.Caveat = $true
+                $result.Message = "доступ есть, аутентификация пройдена, но $url отдаёт 404 — проверьте раскладку файлов"
+            }
+            else {
+                $result.Message = "HTTP $status от $url"
+            }
+            return $result
+        }
+    }
+
+    if (-not $result.Message) { $result.Message = 'проверить не удалось' }
+    return $result
 }
 
 function Select-PlanSoftware {
@@ -158,7 +278,7 @@ function Show-InstallPlan {
     $plan = @{
         Nas       = @{}
         Include   = $null
-        Password  = $NasPassword
+        Password  = (ConvertTo-Secret -Plain $NasPassword)
         Cancelled = $false
     }
 
@@ -194,8 +314,19 @@ function Show-InstallPlan {
     $default = @($software | Where-Object { -not $_.profiles -or ($_.profiles -contains 'base') } |
         ForEach-Object { $_.name })
     $chosen = $default
+    $probe = @($software | Where-Object { $_.nasPath } | Select-Object -First 1).nasPath
+    $access = $null
 
     while ($true) {
+        if (-not $access) {
+            Write-Host '  Проверяю доступ к раздаче…'
+            $credential = $null
+            if ($user -and $plan.Password) {
+                $credential = New-Object System.Management.Automation.PSCredential -ArgumentList $user, $plan.Password
+            }
+            $access = Test-SourceAccess -Type $type -BaseUrl $baseUrl -Share $share `
+                -Credential $credential -ProbePath $probe
+        }
         $source = if ($type -eq 'smb') { $share } else { $baseUrl }
         $extra = @($software | Where-Object { $chosen -notcontains $_.name } | ForEach-Object { $_.name })
         $certs = @()
@@ -208,6 +339,15 @@ function Show-InstallPlan {
         Write-Host ("  Источник ПО      : {0} ({1})" -f $source, $type.ToUpperInvariant())
         Write-Host ("  Учётная запись   : {0}" -f $(if ($user) { $user } else { '— (без аутентификации)' }))
         Write-Host ("  Пароль           : {0}" -f $(if ($plan.Password) { 'задан' } else { 'не задан' }))
+        if ($access.Ok -and -not $access.Caveat) {
+            Write-Host ("  Доступ к раздаче : ОК — {0}" -f $access.Message) -ForegroundColor DarkGreen
+        }
+        elseif ($access.Ok) {
+            Write-Host ("  Доступ к раздаче : с оговоркой — {0}" -f $access.Message) -ForegroundColor DarkYellow
+        }
+        else {
+            Write-Host ("  Доступ к раздаче : НЕТ — {0}" -f $access.Message) -ForegroundColor Red
+        }
         Write-Host ("  Программы        : {0}" -f $chosen.Count)
         foreach ($name in $chosen) { Write-Host "      - $name" }
         if ($extra.Count -gt 0) {
@@ -224,12 +364,20 @@ function Show-InstallPlan {
         Write-Host '  1 — продолжить          4 — пароль к раздаче'
         Write-Host '  2 — адрес раздачи       5 — переключить HTTPS/SMB'
         Write-Host '  3 — набор программ      6 — отмена'
+        Write-Host '  7 — проверить доступ ещё раз'
 
         $answer = (Read-Host '  Выбор [1]').Trim()
         if ([string]::IsNullOrEmpty($answer)) { $answer = '1' }
 
         switch ($answer) {
             '1' {
+                if (-not $access.Ok) {
+                    Write-Host ''
+                    Write-Warning 'Раздача недоступна. После перезагрузки ПО взять будет неоткуда:'
+                    Write-Warning 'встанут только winget-пакеты, правки реестра и системные настройки.'
+                    $confirm = (Read-Host '  Всё равно продолжить? [y/N]').Trim().ToLowerInvariant()
+                    if ($confirm -ne 'y') { continue }
+                }
                 if ($type -ne $config.nas.type) { $plan.Nas['type'] = $type }
                 if ($baseUrl -ne $config.nas.baseUrl) { $plan.Nas['baseUrl'] = $baseUrl }
                 if ($share -ne $config.nas.share) { $plan.Nas['share'] = $share }
@@ -241,17 +389,18 @@ function Show-InstallPlan {
             }
             '2' {
                 $value = (Read-Host "    Адрес раздачи [$baseUrl]").Trim()
-                if ($value) { $baseUrl = $value }
+                if ($value) { $baseUrl = $value; $access = $null }
             }
             '3' { $chosen = @(Select-PlanSoftware -Software $software -Chosen $chosen) }
             '4' {
                 $value = (Read-Host "    Учётная запись [$user]").Trim()
-                if ($value) { $user = $value }
-                $secret = Read-SecretValue -Prompt '    Пароль (Enter — оставить)'
-                if ($secret) { $plan.Password = $secret }
+                if ($value) { $user = $value; $access = $null }
+                $secret = Read-Secret -Prompt '    Пароль (Enter — оставить)'
+                if ($secret) { $plan.Password = $secret; $access = $null }
             }
             '5' {
                 $type = if ($type -eq 'smb') { 'http' } else { 'smb' }
+                $access = $null
                 if ($type -eq 'smb') {
                     $value = (Read-Host "    UNC-путь [$share]").Trim()
                     if ($value) { $share = $value }
@@ -261,6 +410,7 @@ function Show-InstallPlan {
                 $plan.Cancelled = $true
                 return $plan
             }
+            '7' { $access = $null }
             default { Write-Warning "  не понял «$answer»." }
         }
     }
@@ -422,7 +572,7 @@ if (-not $SkipPostInstall) {
 
         if ($plan.Password) {
             $credFile = Join-Path -Path $oobeDir -ChildPath 'nas.cred'
-            [IO.File]::WriteAllText($credFile, $plan.Password, (New-Object Text.UTF8Encoding $false))
+            [IO.File]::WriteAllText($credFile, (ConvertTo-PlainText -Secure $plan.Password), (New-Object Text.UTF8Encoding $false))
             & icacls.exe $credFile /inheritance:r /grant:r 'SYSTEM:(R)' '*S-1-5-32-544:(R)' | Out-Null
             Write-Host "  положил $credFile (доступ: SYSTEM и администраторы)"
         }

@@ -767,16 +767,6 @@
       ]
     },
     {
-      "description": "Магазин: запретить автоматическую загрузку и обновление приложений (профиль storefreeze: заодно замораживает обновления уже установленных приложений магазина, включая App Installer с winget)",
-      "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\WindowsStore",
-      "name": "AutoDownload",
-      "type": "DWord",
-      "value": 2,
-      "profiles": [
-        "storefreeze"
-      ]
-    },
-    {
       "description": "OneDrive: запретить использование для хранения файлов",
       "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\OneDrive",
       "name": "DisableFileSyncNGSC",

@@ -24,6 +24,21 @@
     Какие наборы применять. В postinstall.json у каждого элемента есть profiles;
     элемент без profiles применяется всегда. По умолчанию — base.
 
+.PARAMETER Include
+    Поставить только эти пакеты, независимо от профилей. Сравнение с именем из
+    postinstall.json без учёта регистра, по подстроке и по шаблонам (*, ?).
+    Например: -Include 'Крипто*','7-Zip'
+
+.PARAMETER Exclude
+    Исключить эти пакеты из выбранного набора. Формат тот же, что у Include.
+
+.PARAMETER Select
+    Спросить интерактивно, что ставить: выводится нумерованный список всех
+    пакетов, звёздочкой отмечены выбранные текущими профилями. Только для
+    ручного запуска — при автоматическом прогоне из FirstLogonCommands не
+    задавайте, иначе установка будет ждать ввода. Если консоль неинтерактивна,
+    ключ игнорируется с предупреждением.
+
 .PARAMETER ConfigPath
     Путь к postinstall.json. По умолчанию ищется рядом со скриптом и в
     %ProgramData%\oobe, иначе скачивается с ConfigUri.
@@ -40,6 +55,9 @@
 [CmdletBinding()]
 param(
     [string[]]$Profiles = @('base'),
+    [string[]]$Include,
+    [string[]]$Exclude,
+    [switch]$Select,
     [string]$ConfigPath,
     [string]$ConfigUri = 'https://raw.githubusercontent.com/gpas45/scripts/main/windows/oobe/postinstall.json',
     [string]$NasShare,
@@ -102,6 +120,80 @@ function Test-ProfileMatch {
         if ($Profiles -contains $p) { return $true }
     }
     return $false
+}
+
+function Test-NameMatch {
+    param(
+        [string]$Name,
+        [string[]]$Patterns
+    )
+    foreach ($pattern in $Patterns) {
+        if ($Name -like $pattern -or $Name -like "*$pattern*") { return $true }
+    }
+    return $false
+}
+
+function Select-SoftwareInteractive {
+    param(
+        $Items,
+        $Preselected
+    )
+    $preNames = @($Preselected | ForEach-Object { $_.name })
+
+    Write-Host ''
+    Write-Host 'Что установить:' -ForegroundColor Cyan
+    for ($i = 0; $i -lt $Items.Count; $i++) {
+        $mark = if ($preNames -contains $Items[$i].name) { '*' } else { ' ' }
+        Write-Host ('  [{0}] {1,2}. {2}' -f $mark, ($i + 1), $Items[$i].name)
+    }
+    Write-Host '  * — выбрано текущими профилями; просто Enter оставит этот набор.'
+    Write-Host '  Номера через запятую (1,3,5), диапазоны (1-4), all — всё, none — ничего.'
+
+    $answer = (Read-Host '  Выбор').Trim()
+    if ([string]::IsNullOrEmpty($answer)) { return $Preselected }
+    if ($answer -eq 'all') { return $Items }
+    if ($answer -eq 'none') { return @() }
+
+    $indexes = New-Object 'System.Collections.Generic.List[int]'
+    foreach ($token in ($answer -split '[,;\s]+' | Where-Object { $_ })) {
+        if ($token -match '^(\d+)\s*-\s*(\d+)$') {
+            foreach ($n in [int]$Matches[1]..[int]$Matches[2]) { $indexes.Add($n) }
+        }
+        elseif ($token -match '^\d+$') {
+            $indexes.Add([int]$token)
+        }
+        else {
+            Write-Warning "  не разобрал «$token» — пропускаю."
+        }
+    }
+
+    $result = foreach ($n in ($indexes | Sort-Object -Unique)) {
+        if ($n -ge 1 -and $n -le $Items.Count) { $Items[$n - 1] }
+        else { Write-Warning "  номера $n в списке нет — пропускаю." }
+    }
+    return @($result)
+}
+
+function Get-SoftwareToInstall {
+    param($Items)
+
+    if ($Include) {
+        $selected = @($Items | Where-Object { Test-NameMatch -Name $_.name -Patterns $Include })
+    }
+    else {
+        $selected = @($Items | Where-Object { Test-ProfileMatch -Item $_ })
+    }
+    if ($Exclude) {
+        $selected = @($selected | Where-Object { -not (Test-NameMatch -Name $_.name -Patterns $Exclude) })
+    }
+
+    if (-not $Select) { return $selected }
+
+    if (-not [Environment]::UserInteractive) {
+        Write-Warning 'Консоль неинтерактивна — ключ -Select проигнорирован, беру набор по профилям.'
+        return $selected
+    }
+    return (Select-SoftwareInteractive -Items $Items -Preselected $selected)
 }
 
 function Get-Configuration {
@@ -353,24 +445,33 @@ function Install-WithWinget {
 function Install-FromFile {
     param(
         [string]$Path,
-        [string]$Arguments
+        [string]$Arguments,
+        [int]$TimeoutSeconds = 1800
     )
     $extension = [IO.Path]::GetExtension($Path).ToLowerInvariant()
 
     if ($extension -eq '.msi') {
         $msiArgs = if ($Arguments) { "/i `"$Path`" $Arguments" } else { "/i `"$Path`" /qn /norestart" }
-        $proc = Start-Process -FilePath 'msiexec.exe' -ArgumentList $msiArgs -Wait -PassThru
+        $proc = Start-Process -FilePath 'msiexec.exe' -ArgumentList $msiArgs -PassThru
     }
     elseif ($extension -eq '.ps1') {
-        $proc = Start-Process -FilePath 'powershell.exe' -Wait -PassThru `
+        $proc = Start-Process -FilePath 'powershell.exe' -PassThru `
             -ArgumentList @('-ExecutionPolicy', 'Bypass', '-NoProfile', '-File', $Path)
     }
     elseif ($Arguments) {
-        $proc = Start-Process -FilePath $Path -ArgumentList $Arguments -Wait -PassThru
+        $proc = Start-Process -FilePath $Path -ArgumentList $Arguments -PassThru
     }
     else {
-        $proc = Start-Process -FilePath $Path -Wait -PassThru
+        $proc = Start-Process -FilePath $Path -PassThru
     }
+
+    # Ждём с ограничением: установщик, который спросил что-нибудь у пользователя,
+    # иначе навсегда подвесит первый вход в систему.
+    if (-not $proc.WaitForExit($TimeoutSeconds * 1000)) {
+        try { $proc.Kill() } catch { Write-Warning '  не удалось снять зависший процесс.' }
+        throw "установщик не завершился за $TimeoutSeconds с и был прерван."
+    }
+    $proc.WaitForExit()
 
     $code = $proc.ExitCode
     if ($code -eq 3010 -or $code -eq 1641) {
@@ -388,11 +489,17 @@ function Install-Application {
     )
     $source = if ($Item.PSObject.Properties['source'] -and $Item.source) { $Item.source } else { 'auto' }
     $nasReady = ($Nas -and $Nas.enabled)
+    $timeout = if ($Item.PSObject.Properties['timeoutSeconds'] -and $Item.timeoutSeconds) {
+        [int]$Item.timeoutSeconds
+    }
+    else {
+        1800
+    }
 
     if (($source -eq 'auto' -or $source -eq 'nas') -and $nasReady -and $Item.nasPath) {
         $file = Get-NasFile -Nas $Nas -RelativePath $Item.nasPath
         if ($file) {
-            Install-FromFile -Path $file -Arguments $Item.installerArgs
+            Install-FromFile -Path $file -Arguments $Item.installerArgs -TimeoutSeconds $timeout
             return
         }
         if ($source -eq 'nas') { throw "на NAS нет файла $($Item.nasPath)." }
@@ -408,7 +515,7 @@ function Install-Application {
         $name = Split-Path -Leaf ([uri]$Item.installerUrl).LocalPath
         $dest = Join-Path -Path $script:WorkDir -ChildPath $name
         Invoke-WebRequest -Uri $Item.installerUrl -OutFile $dest -UseBasicParsing
-        Install-FromFile -Path $dest -Arguments $Item.installerArgs
+        Install-FromFile -Path $dest -Arguments $Item.installerArgs -TimeoutSeconds $timeout
         return
     }
 
@@ -578,8 +685,11 @@ if (-not $SkipCertificates -and $config.PSObject.Properties['certificates'] -and
 
 if (-not $SkipSoftware -and $config.PSObject.Properties['software']) {
     Write-Step 'Установка ПО'
-    foreach ($item in $config.software) {
-        if (-not (Test-ProfileMatch -Item $item)) { continue }
+    $toInstall = @(Get-SoftwareToInstall -Items @($config.software))
+    if ($toInstall.Count -eq 0) {
+        Write-Host 'Ничего не выбрано — пропускаю установку ПО.'
+    }
+    foreach ($item in $toInstall) {
         Write-Host "- $($item.name)"
         Invoke-Safely -Label $item.name -Action { Install-Application -Item $item -Nas $nas }
     }

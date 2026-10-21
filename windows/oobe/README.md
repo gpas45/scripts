@@ -78,7 +78,11 @@ powershell -c "iex ((irm https://raw.githubusercontent.com/gpas45/scripts/main/w
 ├─ VLC\vlc-win64.exe
 ├─ YandexBrowser\Yandex.msi
 ├─ Far\Far-x64.msi
-├─ CryptoPro\cprocsp-pki-cades-x64.msi
+├─ Aspia\aspia-host-x86_64.msi
+├─ CryptoPro\
+│  ├─ cprocsp-pki-cades-x64.msi
+│  └─ CSP\csp-x64-kc1.msi
+├─ Kontur\Certificates_Kontur_Admin.exe
 ├─ Certificates\
 │  ├─ russian_trusted_root_ca.cer
 │  └─ russian_trusted_sub_ca.cer
@@ -130,7 +134,49 @@ powershell -ExecutionPolicy Bypass -File .\postinstall.ps1 -Profiles base,browse
 | `base` | 7-Zip, Adobe Reader, Notepad++, сертификаты Минцифры, все правки реестра, системные настройки |
 | `browser` | Chrome, Firefox, Яндекс Браузер для организаций |
 | `extra` | VLC, Far Manager — опционально, в базовый набор не входят |
-| `crypto` | КриптоПро ЭЦП Browser plug-in — заполните `nasPath`/`installerUrl` своим дистрибутивом |
+| `crypto` | КриптоПро CSP, КриптоПро ЭЦП Browser plug-in, сертификаты УЦ СКБ Контур |
+| `remote` | Aspia Host |
+
+### Выбор того, что ставить
+
+Профили — не единственный способ. Есть три ключа, они складываются:
+
+```powershell
+# спросить интерактивно: нумерованный список, звёздочкой отмечено выбранное профилями
+.\postinstall.ps1 -Select
+
+# только определённые пакеты, профили при этом игнорируются
+.\postinstall.ps1 -Include 'Крипто*','Контур','Aspia'
+
+# набор профилей минус лишнее
+.\postinstall.ps1 -Profiles base,browser -Exclude Chrome,Firefox
+```
+
+`-Include` и `-Exclude` сравниваются с полем `name` без учёта регистра, по
+подстроке и по шаблонам (`*`, `?`). В интерактивном режиме принимаются номера
+через запятую (`1,3,5`), диапазоны (`1-4`), `all`, `none`; пустой ввод оставляет
+набор по профилям.
+
+> `-Select` — только для ручного запуска. В `FirstLogonCommands` его задавать
+> нельзя: установка будет ждать ввода. Если консоль неинтерактивна, ключ
+> игнорируется с предупреждением, но полагаться на это не стоит.
+
+#### Пакеты, которых нет в winget
+
+Их дистрибутивы кладутся на NAS, `wingetId` у них пустой.
+
+| Пакет | Где взять | Замечания |
+|---|---|---|
+| Яндекс Браузер для организаций | [личный кабинет корпоративного браузера](https://browser.yandex.ru/corp) | Ключи тихой установки у разных сборок отличаются |
+| КриптоПро CSP | cryptopro.ru по вашей лицензии | Имя MSI зависит от версии и варианта KC1/KC2 — сверьте `nasPath`. Лицензия вводится отдельно: `cpconfig.exe -license -set <серийный номер>` |
+| Сертификаты УЦ СКБ Контур | личный кабинет Контура | `SKBKontur.InstallCertificates`, консольная утилита, сертификаты зашиты внутрь, требует прав администратора. Свои команды смотрите через `/?` |
+| Aspia Host | [github.com/dchapyshev/aspia/releases](https://github.com/dchapyshev/aspia/releases) | После установки хост нужно настроить (пароль/ID), иначе подключиться не получится |
+
+У каждого пакета можно задать `timeoutSeconds`: если установщик не завершился
+за это время (например, что-то спросил), процесс снимается, шаг помечается
+ошибкой, а остальная настройка продолжается. По умолчанию 1800 с. Это важно
+именно для автоматического прогона: зависший установщик иначе навсегда
+подвесит первый вход в систему.
 
 Яндекс Браузер для организаций в winget не публикуется — только MSI. Скачайте
 его в [личном кабинете корпоративного браузера](https://browser.yandex.ru/corp),

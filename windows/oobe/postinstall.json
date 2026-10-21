@@ -172,6 +172,69 @@
         "crypto"
       ],
       "_comment": "wingetId пустой — заполните installerUrl ссылкой на дистрибутив с вашего файлового сервера."
+    },
+    {
+      "name": "КриптоПро CSP",
+      "source": "auto",
+      "wingetId": "",
+      "nasPath": "CryptoPro/CSP/csp-x64-kc1.msi",
+      "installerArgs": "/qn /norestart",
+      "installerUrl": "",
+      "timeoutSeconds": 900,
+      "profiles": [
+        "crypto"
+      ],
+      "_comment": [
+        "Дистрибутив берётся по вашей лицензии с cryptopro.ru и кладётся на NAS;",
+        "в winget КриптоПро не публикуется. Имя MSI внутри дистрибутива",
+        "отличается по версии и варианту (KC1/KC2) — сверьте с nasPath.",
+        "Лицензия вводится отдельно, установщик её не спрашивает:",
+        "\"C:\\Program Files\\Crypto Pro\\CSP\\cpconfig.exe\" -license -set <серийный номер>",
+        "Набор компонентов при необходимости задаётся через ADDLOCAL в installerArgs."
+      ]
+    },
+    {
+      "name": "Сертификаты УЦ СКБ Контур",
+      "source": "auto",
+      "wingetId": "",
+      "nasPath": "Kontur/Certificates_Kontur_Admin.exe",
+      "installerArgs": "",
+      "installerUrl": "",
+      "timeoutSeconds": 300,
+      "profiles": [
+        "crypto"
+      ],
+      "_comment": [
+        "SKBKontur.InstallCertificates (вариант сборки Kontur_Admin): консольная",
+        "утилита, сертификаты УЦ Контура зашиты в неё, ставит их в хранилища",
+        "локального компьютера. Требует прав администратора — FirstLogonCommands",
+        "их даёт. Запускается без аргументов; у неё есть и свои команды",
+        "(help, добавление из каталога, удаление) — посмотрите вывод",
+        "Certificates_Kontur_Admin.exe /? на тестовой машине.",
+        "Файл в репозиторий не кладётся: берите его в личном кабинете Контура",
+        "и размещайте на NAS. SHA256 присланного вами файла",
+        "554d8c4d8fc95b9791fc6cc843c82327e4e7bc4809f994a6049fde81f3161f19",
+        "Если утилита ждёт нажатия клавиши, первый вход на ней зависнет —",
+        "поэтому стоит timeoutSeconds: по его истечении процесс снимается,",
+        "шаг помечается ошибкой, а остальная настройка продолжается."
+      ]
+    },
+    {
+      "name": "Aspia Host",
+      "source": "auto",
+      "wingetId": "",
+      "nasPath": "Aspia/aspia-host-x86_64.msi",
+      "installerArgs": "/qn /norestart",
+      "installerUrl": "",
+      "timeoutSeconds": 600,
+      "profiles": [
+        "remote"
+      ],
+      "_comment": [
+        "Сборки: https://github.com/dchapyshev/aspia/releases — положите MSI на NAS.",
+        "После установки хост настраивается отдельно (пароль/ID), иначе",
+        "подключиться к машине не получится."
+      ]
     }
   ],
   "office": {

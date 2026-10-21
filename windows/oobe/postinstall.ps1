@@ -919,6 +919,53 @@ function Set-RegistryTweak {
     New-ItemProperty -LiteralPath $Tweak.path -Name $name -PropertyType $type -Value $Tweak.value -Force | Out-Null
 }
 
+function Remove-OneDrive {
+    Get-Process -Name 'OneDrive' -ErrorAction SilentlyContinue |
+        Stop-Process -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 2
+
+    # OneDrive бывает установлен и для машины, и в профиль пользователя.
+    $setups = @(
+        (Join-Path -Path $env:SystemRoot -ChildPath 'SysWOW64\OneDriveSetup.exe'),
+        (Join-Path -Path $env:SystemRoot -ChildPath 'System32\OneDriveSetup.exe'),
+        (Join-Path -Path $env:LOCALAPPDATA -ChildPath 'Microsoft\OneDrive\OneDriveSetup.exe')
+    ) | Where-Object { Test-Path -LiteralPath $_ }
+
+    if (-not $setups) {
+        Write-Host '  OneDriveSetup.exe не найден — похоже, уже удалён.'
+    }
+    foreach ($setup in $setups) {
+        Write-Host "  $setup /uninstall"
+        $proc = Start-Process -FilePath $setup -ArgumentList '/uninstall' -PassThru
+        if (-not $proc.WaitForExit(300000)) {
+            try { $proc.Kill() } catch { Write-Warning '  не удалось снять зависший OneDriveSetup.' }
+            Write-Warning '  OneDriveSetup не завершился за 5 минут и был прерван.'
+            continue
+        }
+        $proc.WaitForExit()
+    }
+
+    # В части сборок Windows 11 OneDrive приходит ещё и пакетом приложения.
+    Get-AppxProvisionedPackage -Online -ErrorAction SilentlyContinue |
+        Where-Object { $_.DisplayName -like '*OneDrive*' } |
+        ForEach-Object {
+            Write-Host "  убираю из образа пакет $($_.DisplayName)"
+            Remove-AppxProvisionedPackage -Online -PackageName $_.PackageName -ErrorAction SilentlyContinue | Out-Null
+        }
+    Get-AppxPackage -Name '*OneDrive*' -ErrorAction SilentlyContinue |
+        Remove-AppxPackage -ErrorAction SilentlyContinue
+
+    foreach ($run in @('HKCU:\Software\Microsoft\Windows\CurrentVersion\Run',
+                       'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run')) {
+        Remove-ItemProperty -LiteralPath $run -Name 'OneDrive' -ErrorAction SilentlyContinue
+        Remove-ItemProperty -LiteralPath $run -Name 'OneDriveSetup' -ErrorAction SilentlyContinue
+    }
+
+    # Папку %UserProfile%\OneDrive намеренно не трогаем: в ней могут лежать
+    # файлы пользователя, а удаление клиента их не возвращает.
+    Write-Host '  папка профиля OneDrive оставлена как есть — в ней могут быть файлы.'
+}
+
 function Set-SystemSetting {
     param($Settings)
 
@@ -942,6 +989,10 @@ function Set-SystemSetting {
             }
             Set-WinDefaultInputMethodOverride -InputTip $tip -ErrorAction Stop
         }
+    }
+
+    if ($Settings.removeOneDrive) {
+        Invoke-Safely -Label 'удаление OneDrive' -Action { Remove-OneDrive }
     }
 
     if ($Settings.disableHibernation) {

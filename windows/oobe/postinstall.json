@@ -775,11 +775,42 @@
       "profiles": [
         "storefreeze"
       ]
+    },
+    {
+      "description": "OneDrive: запретить использование для хранения файлов",
+      "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\OneDrive",
+      "name": "DisableFileSyncNGSC",
+      "type": "DWord",
+      "value": 1,
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "description": "OneDrive: убрать из боковой панели Проводника",
+      "path": "HKLM:\\SOFTWARE\\Classes\\CLSID\\{018D5C66-4533-4307-9B53-224DE2ED1FE6}",
+      "name": "System.IsPinnedToNameSpaceTree",
+      "type": "DWord",
+      "value": 0,
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "description": "OneDrive: убрать из боковой панели Проводника (32-битные приложения)",
+      "path": "HKLM:\\SOFTWARE\\Classes\\Wow6432Node\\CLSID\\{018D5C66-4533-4307-9B53-224DE2ED1FE6}",
+      "name": "System.IsPinnedToNameSpaceTree",
+      "type": "DWord",
+      "value": 0,
+      "profiles": [
+        "base"
+      ]
     }
   ],
   "system": {
     "timeZone": "Ekaterinburg Standard Time",
     "defaultInputLanguage": "en-US",
+    "removeOneDrive": true,
     "computerName": "",
     "disableHibernation": true,
     "neverSleepOnAc": true,

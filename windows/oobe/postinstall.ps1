@@ -39,6 +39,11 @@
     задавайте, иначе установка будет ждать ввода. Если консоль неинтерактивна,
     ключ игнорируется с предупреждением.
 
+.PARAMETER NoPrompt
+    Ничего не спрашивать и не ждать подтверждения. Обязателен при запуске из
+    FirstLogonCommands: там сеанс интерактивный, и без этого ключа первый вход
+    завис бы на вопросе.
+
 .PARAMETER ConfigPath
     Путь к postinstall.json. По умолчанию ищется рядом со скриптом и в
     %ProgramData%\oobe, иначе скачивается с ConfigUri.
@@ -69,6 +74,7 @@ param(
     [string[]]$Include,
     [string[]]$Exclude,
     [switch]$Select,
+    [switch]$NoPrompt,
     [string]$ConfigPath,
     [string]$ConfigUri = 'https://raw.githubusercontent.com/gpas45/scripts/main/windows/oobe/postinstall.json',
     [ValidateSet('http', 'smb')]
@@ -231,25 +237,38 @@ function Get-Configuration {
     return ($raw | ConvertFrom-Json)
 }
 
-function Merge-NasOverride {
-    param($Nas)
-
-    # nas.override.json пишет oobe.ps1, когда адрес раздачи задали ключом или
-    # ввели в OOBE. Так адрес меняется без правки postinstall.json.
+function Get-Override {
+    # postinstall.override.json пишет oobe.ps1 по итогам экрана плана: адрес
+    # раздачи, учётная запись, выбранный набор ПО. Так postinstall.json не
+    # приходится править под каждую машину.
     $candidates = @()
-    if ($PSScriptRoot) { $candidates += (Join-Path -Path $PSScriptRoot -ChildPath 'nas.override.json') }
-    $candidates += (Join-Path -Path $env:ProgramData -ChildPath 'oobe\nas.override.json')
+    if ($PSScriptRoot) { $candidates += (Join-Path -Path $PSScriptRoot -ChildPath 'postinstall.override.json') }
+    $candidates += (Join-Path -Path $env:ProgramData -ChildPath 'oobe\postinstall.override.json')
 
     foreach ($candidate in $candidates) {
         if (-not (Test-Path -LiteralPath $candidate)) { continue }
-        Write-Host "Переопределение NAS: $candidate"
-        $override = Get-Content -LiteralPath $candidate -Raw -Encoding UTF8 | ConvertFrom-Json
-        foreach ($property in $override.PSObject.Properties) {
-            if ($property.Name -like '_*') { continue }
-            $Nas | Add-Member -NotePropertyName $property.Name -NotePropertyValue $property.Value -Force
-            Write-Host "  $($property.Name) = $($property.Value)"
+        Write-Host "Переопределение: $candidate"
+        try {
+            return (Get-Content -LiteralPath $candidate -Raw -Encoding UTF8 | ConvertFrom-Json)
         }
-        break
+        catch {
+            Write-Warning "Не удалось прочитать $candidate — $($_.Exception.Message)"
+            return $null
+        }
+    }
+    return $null
+}
+
+function Merge-NasOverride {
+    param(
+        $Nas,
+        $Override
+    )
+    if (-not $Override -or -not $Override.PSObject.Properties['nas']) { return }
+    foreach ($property in $Override.nas.PSObject.Properties) {
+        if ($property.Name -like '_*') { continue }
+        $Nas | Add-Member -NotePropertyName $property.Name -NotePropertyValue $property.Value -Force
+        Write-Host "  nas.$($property.Name) = $($property.Value)"
     }
 }
 
@@ -714,11 +733,28 @@ function Set-SystemSetting {
 $config = Get-Configuration
 Write-Host "Профили: $($Profiles -join ', ')"
 
+# Приоритет везде один: postinstall.json -> postinstall.override.json -> ключи.
+$override = Get-Override
+
+if ($override) {
+    if (-not $PSBoundParameters.ContainsKey('Profiles') -and $override.PSObject.Properties['profiles'] -and $override.profiles) {
+        $Profiles = @($override.profiles)
+        Write-Host "  profiles = $($Profiles -join ', ')"
+    }
+    if (-not $Include -and $override.PSObject.Properties['include'] -and $override.include) {
+        $Include = @($override.include)
+        Write-Host "  include = $($Include -join ', ')"
+    }
+    if (-not $Exclude -and $override.PSObject.Properties['exclude'] -and $override.exclude) {
+        $Exclude = @($override.exclude)
+        Write-Host "  exclude = $($Exclude -join ', ')"
+    }
+}
+
 $nas = $null
 if ($config.PSObject.Properties['nas']) { $nas = $config.nas }
 if ($nas) {
-    # Приоритет: postinstall.json -> nas.override.json -> ключи командной строки.
-    Merge-NasOverride -Nas $nas
+    Merge-NasOverride -Nas $nas -Override $override
     if ($NasType) { $nas.type = $NasType }
     if ($NasBaseUrl) { $nas.baseUrl = $NasBaseUrl }
     if ($NasShare) { $nas.share = $NasShare }
@@ -732,12 +768,78 @@ if ($nas -and $nas.enabled) {
     Invoke-Safely -Label "подключение к NAS ($($nas.type))" -Action { Connect-NasShare -Nas $nas }
 }
 
+# --- План установки ---------------------------------------------------------
+
+$plannedSoftware = @()
+if (-not $SkipSoftware -and $config.PSObject.Properties['software']) {
+    $plannedSoftware = @(Get-SoftwareToInstall -Items @($config.software))
+}
+$plannedCerts = @()
+if (-not $SkipCertificates -and $config.PSObject.Properties['certificates'] -and $config.certificates.enabled) {
+    $plannedCerts = @($config.certificates.items | Where-Object { Test-ProfileMatch -Item $_ })
+}
+$plannedTweaks = @()
+if (-not $SkipRegistry -and $config.PSObject.Properties['registry']) {
+    $plannedTweaks = @($config.registry | Where-Object { Test-ProfileMatch -Item $_ })
+}
+
+Write-Step 'План установки'
+if ($nas -and $nas.enabled) {
+    $source = if ($nas.type -eq 'smb') { $nas.share } else { $nas.baseUrl }
+    $auth = if ($script:NasHttpHeaders -or $nas.user) { "учётная запись $($nas.user)" } else { 'без аутентификации' }
+    Write-Host ("  Источник дистрибутивов : {0} ({1}, {2})" -f $source, $nas.type.ToUpperInvariant(), $auth)
+}
+else {
+    Write-Host '  Источник дистрибутивов : только winget и прямые ссылки'
+}
+Write-Host ("  Профили                : {0}" -f ($Profiles -join ', '))
+Write-Host ("  Программ к установке   : {0}" -f $plannedSoftware.Count)
+foreach ($item in $plannedSoftware) { Write-Host "      - $($item.name)" }
+
+$skipped = @($config.software | Where-Object { $n = $_.name; -not ($plannedSoftware | Where-Object { $_.name -eq $n }) })
+if ($skipped.Count -gt 0) {
+    Write-Host ("  Дополнительные пакеты  : {0}" -f (($skipped | ForEach-Object { $_.name }) -join ', '))
+    Write-Host '                           (не ставятся; добавьте профиль или -Include)'
+}
+
+Write-Host ("  Сертификатов           : {0}" -f $plannedCerts.Count)
+foreach ($item in $plannedCerts) { Write-Host "      - $($item.name) -> $($item.store)" }
+Write-Host ("  Правок реестра         : {0}" -f $plannedTweaks.Count)
+
+$officeState = if ($config.PSObject.Properties['office'] -and $config.office.enabled -and -not $SkipOffice) {
+    "будет установлен ($($config.office.mode))"
+}
+else {
+    'выключен'
+}
+Write-Host ("  Microsoft Office       : {0}" -f $officeState)
+if (-not $SkipSystem -and $config.PSObject.Properties['system']) {
+    Write-Host ("  Системные настройки    : часовой пояс {0}, раскладка {1}, RDP {2}" -f
+        $config.system.timeZone,
+        $config.system.defaultInputLanguage,
+        $(if ($config.system.enableRdp) { 'включить' } else { 'не трогать' }))
+}
+Write-Host ("  Лог                    : {0}" -f $LogPath)
+
+if (-not $NoPrompt -and [Environment]::UserInteractive) {
+    Write-Host ''
+    Write-Host '  Enter — продолжить, n — изменить набор ПО, q — выход.'
+    $answer = (Read-Host '  Продолжаем?').Trim().ToLowerInvariant()
+    if ($answer -eq 'q') {
+        Write-Host 'Отменено пользователем.'
+        try { Stop-Transcript | Out-Null } catch { Write-Verbose 'Transcript уже остановлен.' }
+        exit 0
+    }
+    if ($answer -eq 'n') {
+        $plannedSoftware = @(Select-SoftwareInteractive -Items @($config.software) -Preselected $plannedSoftware)
+    }
+}
+
 # Сертификаты ставим до ПО: без корневого ЦС может не открыться HTTPS
 # внутренних серверов, откуда идут дистрибутивы.
 if (-not $SkipCertificates -and $config.PSObject.Properties['certificates'] -and $config.certificates.enabled) {
     Write-Step 'Доверенные сертификаты'
-    foreach ($item in $config.certificates.items) {
-        if (-not (Test-ProfileMatch -Item $item)) { continue }
+    foreach ($item in $plannedCerts) {
         Write-Host "- $($item.name)"
         Invoke-Safely -Label $item.name -Action { Import-TrustedCertificate -Item $item -Nas $nas }
     }
@@ -745,11 +847,10 @@ if (-not $SkipCertificates -and $config.PSObject.Properties['certificates'] -and
 
 if (-not $SkipSoftware -and $config.PSObject.Properties['software']) {
     Write-Step 'Установка ПО'
-    $toInstall = @(Get-SoftwareToInstall -Items @($config.software))
-    if ($toInstall.Count -eq 0) {
+    if ($plannedSoftware.Count -eq 0) {
         Write-Host 'Ничего не выбрано — пропускаю установку ПО.'
     }
-    foreach ($item in $toInstall) {
+    foreach ($item in $plannedSoftware) {
         Write-Host "- $($item.name)"
         Invoke-Safely -Label $item.name -Action { Install-Application -Item $item -Nas $nas }
     }
@@ -762,8 +863,7 @@ if (-not $SkipOffice -and $config.PSObject.Properties['office'] -and $config.off
 
 if (-not $SkipRegistry -and $config.PSObject.Properties['registry']) {
     Write-Step 'Правки реестра'
-    foreach ($tweak in $config.registry) {
-        if (-not (Test-ProfileMatch -Item $tweak)) { continue }
+    foreach ($tweak in $plannedTweaks) {
         Invoke-Safely -Label $tweak.description -Action { Set-RegistryTweak -Tweak $tweak }
     }
 }

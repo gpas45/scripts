@@ -19,8 +19,14 @@
         powershell -c "iex ((irm https://raw.githubusercontent.com/gpas45/scripts/main/windows/oobe/oobe.ps1) -replace '^\uFEFF')"
 
     Скрипт проверяет, что система действительно находится в OOBE, скачивает файл
-    ответов (проход oobeSystem), сохраняет его в UTF-8 без BOM и передаёт sysprep
-    с ключами /oobe /reboot. После перезагрузки OOBE проходит без участия человека.
+    ответов (проход oobeSystem) и пост-установочные файлы, показывает план
+    установки и даёт его поправить (адрес раздачи, учётная запись и пароль,
+    набор программ, HTTPS/SMB), после чего передаёт файл ответов sysprep с
+    ключами /oobe /reboot.
+
+    Человек присутствует только на этом шаге, поэтому все вопросы задаются
+    здесь. Дальше всё идёт само: перезагрузка, OOBE без вопросов, автовход,
+    пост-установка.
 
     sysprep запускается БЕЗ /generalize: это намеренно — машина остаётся той же
     (драйверы, активация, SID сохраняются), меняются только настройки OOBE.
@@ -63,7 +69,8 @@
     входе.
 
 .PARAMETER NoPrompt
-    Ничего не спрашивать: взять адрес раздачи из конфига и ключей как есть.
+    Не показывать экран плана и ничего не спрашивать: взять всё из конфига и
+    ключей командной строки как есть.
 
 .PARAMETER SkipPostInstall
     Не скачивать postinstall.*: файл ответов тогда возьмёт скрипт из интернета.
@@ -95,6 +102,168 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+# --- Экран плана установки ---------------------------------------------------
+
+function Read-SecretValue {
+    param([string]$Prompt)
+    $secure = Read-Host -Prompt $Prompt -AsSecureString
+    if (-not $secure -or $secure.Length -eq 0) { return $null }
+    $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
+    try { return [Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr) }
+    finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
+}
+
+function Select-PlanSoftware {
+    param(
+        $Software,
+        [string[]]$Chosen
+    )
+    Write-Host ''
+    for ($i = 0; $i -lt $Software.Count; $i++) {
+        $mark = if ($Chosen -contains $Software[$i].name) { '*' } else { ' ' }
+        Write-Host ('    [{0}] {1,2}. {2}' -f $mark, ($i + 1), $Software[$i].name)
+    }
+    Write-Host '    * — входит в набор по умолчанию. Enter — оставить как есть.'
+    Write-Host '    Номера через запятую (1,3,5), диапазоны (1-4), all — всё, none — ничего.'
+
+    $answer = (Read-Host '    Выбор').Trim()
+    if ([string]::IsNullOrEmpty($answer)) { return $Chosen }
+    if ($answer -eq 'all') { return @($Software | ForEach-Object { $_.name }) }
+    if ($answer -eq 'none') { return @() }
+
+    $indexes = New-Object 'System.Collections.Generic.List[int]'
+    foreach ($token in ($answer -split '[,;\s]+' | Where-Object { $_ })) {
+        if ($token -match '^(\d+)\s*-\s*(\d+)$') {
+            foreach ($n in [int]$Matches[1]..[int]$Matches[2]) { $indexes.Add($n) }
+        }
+        elseif ($token -match '^\d+$') {
+            $indexes.Add([int]$token)
+        }
+        else {
+            Write-Warning "    не разобрал «$token» — пропускаю."
+        }
+    }
+    $result = foreach ($n in ($indexes | Sort-Object -Unique)) {
+        if ($n -ge 1 -and $n -le $Software.Count) { $Software[$n - 1].name }
+        else { Write-Warning "    номера $n в списке нет — пропускаю." }
+    }
+    return @($result)
+}
+
+function Show-InstallPlan {
+    param([string]$ConfigPath)
+
+    $plan = @{
+        Nas       = @{}
+        Include   = $null
+        Password  = $NasPassword
+        Cancelled = $false
+    }
+
+    $config = $null
+    if (Test-Path -LiteralPath $ConfigPath) {
+        try { $config = Get-Content -LiteralPath $ConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json }
+        catch { Write-Warning "Не удалось прочитать $ConfigPath — $($_.Exception.Message)" }
+    }
+    if (-not $config) {
+        Write-Warning 'Конфигурация недоступна — показать план нельзя, применяю только ключи командной строки.'
+        if ($NasType) { $plan.Nas['type'] = $NasType }
+        if ($NasBaseUrl) { $plan.Nas['baseUrl'] = $NasBaseUrl }
+        if ($NasShare) { $plan.Nas['share'] = $NasShare }
+        if ($NasUser) { $plan.Nas['user'] = $NasUser }
+        return $plan
+    }
+
+    # Исходные значения: конфиг, поверх — ключи командной строки.
+    $type = if ($NasType) { $NasType } else { $config.nas.type }
+    $baseUrl = if ($NasBaseUrl) { $NasBaseUrl } else { $config.nas.baseUrl }
+    $share = if ($NasShare) { $NasShare } else { $config.nas.share }
+    $user = if ($NasUser) { $NasUser } else { $config.nas.user }
+
+    if ($NoPrompt -or -not [Environment]::UserInteractive) {
+        if ($NasType) { $plan.Nas['type'] = $NasType }
+        if ($NasBaseUrl) { $plan.Nas['baseUrl'] = $NasBaseUrl }
+        if ($NasShare) { $plan.Nas['share'] = $NasShare }
+        if ($NasUser) { $plan.Nas['user'] = $NasUser }
+        return $plan
+    }
+
+    $software = @($config.software)
+    $default = @($software | Where-Object { -not $_.profiles -or ($_.profiles -contains 'base') } |
+        ForEach-Object { $_.name })
+    $chosen = $default
+
+    while ($true) {
+        $source = if ($type -eq 'smb') { $share } else { $baseUrl }
+        $extra = @($software | Where-Object { $chosen -notcontains $_.name } | ForEach-Object { $_.name })
+        $certs = @()
+        if ($config.PSObject.Properties['certificates'] -and $config.certificates.enabled) {
+            $certs = @($config.certificates.items | ForEach-Object { $_.name })
+        }
+
+        Write-Host ''
+        Write-Host '================ План установки ================' -ForegroundColor Cyan
+        Write-Host ("  Источник ПО      : {0} ({1})" -f $source, $type.ToUpperInvariant())
+        Write-Host ("  Учётная запись   : {0}" -f $(if ($user) { $user } else { '— (без аутентификации)' }))
+        Write-Host ("  Пароль           : {0}" -f $(if ($plan.Password) { 'задан' } else { 'не задан' }))
+        Write-Host ("  Программы        : {0}" -f $chosen.Count)
+        foreach ($name in $chosen) { Write-Host "      - $name" }
+        if ($extra.Count -gt 0) {
+            Write-Host ("  Дополнительно    : {0}" -f ($extra -join ', '))
+        }
+        if ($certs.Count -gt 0) {
+            Write-Host ("  Сертификаты      : {0}" -f ($certs -join ', '))
+        }
+        Write-Host ("  Правки реестра   : {0}" -f @($config.registry).Count)
+        Write-Host ("  Office           : {0}" -f $(if ($config.office.enabled) { $config.office.mode } else { 'не ставим' }))
+        Write-Host ("  Часовой пояс     : {0}" -f $config.system.timeZone)
+        Write-Host ("  Администратор    : Admin (пароль из файла ответов — смените после установки)")
+        Write-Host '==============================================='
+        Write-Host '  1 — продолжить          4 — пароль к раздаче'
+        Write-Host '  2 — адрес раздачи       5 — переключить HTTPS/SMB'
+        Write-Host '  3 — набор программ      6 — отмена'
+
+        $answer = (Read-Host '  Выбор [1]').Trim()
+        if ([string]::IsNullOrEmpty($answer)) { $answer = '1' }
+
+        switch ($answer) {
+            '1' {
+                if ($type -ne $config.nas.type) { $plan.Nas['type'] = $type }
+                if ($baseUrl -ne $config.nas.baseUrl) { $plan.Nas['baseUrl'] = $baseUrl }
+                if ($share -ne $config.nas.share) { $plan.Nas['share'] = $share }
+                if ($user -ne $config.nas.user) { $plan.Nas['user'] = $user }
+                if (@(Compare-Object -ReferenceObject $default -DifferenceObject $chosen -SyncWindow 0).Count -gt 0) {
+                    $plan.Include = $chosen
+                }
+                return $plan
+            }
+            '2' {
+                $value = (Read-Host "    Адрес раздачи [$baseUrl]").Trim()
+                if ($value) { $baseUrl = $value }
+            }
+            '3' { $chosen = @(Select-PlanSoftware -Software $software -Chosen $chosen) }
+            '4' {
+                $value = (Read-Host "    Учётная запись [$user]").Trim()
+                if ($value) { $user = $value }
+                $secret = Read-SecretValue -Prompt '    Пароль (Enter — оставить)'
+                if ($secret) { $plan.Password = $secret }
+            }
+            '5' {
+                $type = if ($type -eq 'smb') { 'http' } else { 'smb' }
+                if ($type -eq 'smb') {
+                    $value = (Read-Host "    UNC-путь [$share]").Trim()
+                    if ($value) { $share = $value }
+                }
+            }
+            '6' {
+                $plan.Cancelled = $true
+                return $plan
+            }
+            default { Write-Warning "  не понял «$answer»." }
+        }
+    }
+}
 
 # --- 1. Проверка: находимся ли мы на этапе OOBE ------------------------------
 if (-not ('Api.Kernel32' -as [type])) {
@@ -209,47 +378,32 @@ if (-not $SkipPostInstall) {
             Write-Host "  положил $target"
         }
 
-        # Адрес раздачи дистрибутивов. Запись в nas.override.json рядом с
-        # конфигом: postinstall.ps1 подхватит её при первом входе, а сам
-        # postinstall.json править не нужно.
+        # Экран плана: человек присутствует только здесь, поэтому все вопросы
+        # задаются на этом шаге. Результат пишется в postinstall.override.json
+        # рядом с конфигом — postinstall.ps1 подхватит его при первом входе,
+        # а сам postinstall.json править не нужно.
         $staged = Join-Path -Path $oobeDir -ChildPath 'postinstall.json'
-        $nasType = $NasType
-        $nasBaseUrl = $NasBaseUrl
-        $nasShare = $NasShare
+        $plan = Show-InstallPlan -ConfigPath $staged
 
-        if (-not $NoPrompt -and -not $nasBaseUrl -and [Environment]::UserInteractive) {
-            $current = $null
-            if (Test-Path -LiteralPath $staged) {
-                try {
-                    $current = (Get-Content -LiteralPath $staged -Raw -Encoding UTF8 | ConvertFrom-Json).nas.baseUrl
-                }
-                catch {
-                    Write-Warning "Не удалось прочитать адрес из конфига: $($_.Exception.Message)"
-                }
-            }
-            Write-Host ''
-            Write-Host 'Откуда брать дистрибутивы ПО (Enter — оставить как есть):'
-            $answer = (Read-Host "  Адрес раздачи [$current]").Trim()
-            if ($answer) { $nasBaseUrl = $answer }
+        if ($plan.Cancelled) {
+            Write-Host 'Отменено — sysprep не запускался, система осталась в OOBE.'
+            exit 0
         }
 
         $override = @{}
-        if ($nasType) { $override['type'] = $nasType }
-        if ($nasBaseUrl) { $override['baseUrl'] = $nasBaseUrl }
-        if ($nasShare) { $override['share'] = $nasShare }
-        if ($NasUser) { $override['user'] = $NasUser }
+        if ($plan.Nas.Count -gt 0) { $override['nas'] = $plan.Nas }
+        if ($plan.Include) { $override['include'] = $plan.Include }
 
         if ($override.Count -gt 0) {
-            $overrideFile = Join-Path -Path $oobeDir -ChildPath 'nas.override.json'
-            $override | ConvertTo-Json -Depth 3 |
+            $overrideFile = Join-Path -Path $oobeDir -ChildPath 'postinstall.override.json'
+            $override | ConvertTo-Json -Depth 4 |
                 Set-Content -LiteralPath $overrideFile -Encoding UTF8
             Write-Host "  положил $overrideFile"
-            foreach ($key in $override.Keys) { Write-Host "    $key = $($override[$key])" }
         }
 
-        if ($NasPassword) {
+        if ($plan.Password) {
             $credFile = Join-Path -Path $oobeDir -ChildPath 'nas.cred'
-            [IO.File]::WriteAllText($credFile, $NasPassword, (New-Object Text.UTF8Encoding $false))
+            [IO.File]::WriteAllText($credFile, $plan.Password, (New-Object Text.UTF8Encoding $false))
             & icacls.exe $credFile /inheritance:r /grant:r 'SYSTEM:(R)' '*S-1-5-32-544:(R)' | Out-Null
             Write-Host "  положил $credFile (доступ: SYSTEM и администраторы)"
         }

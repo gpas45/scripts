@@ -76,7 +76,7 @@
                 <SynchronousCommand wcm:action="add">
                     <Order>1</Order>
                     <Description>Postinstall: software, registry, system settings</Description>
-                    <CommandLine>powershell -ExecutionPolicy Bypass -NoProfile -Command "$p=Join-Path $env:ProgramData 'oobe\postinstall.ps1'; if(Test-Path $p){powershell -ExecutionPolicy Bypass -NoProfile -File $p -Profiles base}else{iex ((irm 'https://raw.githubusercontent.com/gpas45/scripts/main/windows/oobe/postinstall.ps1' -UseBasicParsing) -replace '^\uFEFF')}"</CommandLine>
+                    <CommandLine>powershell -ExecutionPolicy Bypass -NoProfile -Command "$p=Join-Path $env:ProgramData 'oobe\postinstall.ps1'; if(Test-Path $p){powershell -ExecutionPolicy Bypass -NoProfile -File $p -Profiles base -NoPrompt}else{iex ((irm 'https://raw.githubusercontent.com/gpas45/scripts/main/windows/oobe/postinstall.ps1' -UseBasicParsing) -replace '^\uFEFF')}"</CommandLine>
                 </SynchronousCommand>
                 <!-- Потребовать смену пароля при первом входе (снимает «срок действия
                      не ограничен»). Раскомментируйте, если машина уезжает к пользователю.

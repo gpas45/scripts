@@ -32,18 +32,52 @@ irm https://raw.githubusercontent.com/gpas45/scripts/main/windows/oobe/oobe.ps1 
 powershell -ExecutionPolicy Bypass -File $env:TEMP\oobe.ps1
 ```
 
-Скрипт спросит адрес раздачи дистрибутивов, подставив значение из конфига
-(`https://nas.dioservice.ru/install`) — Enter оставит как есть, иначе введите
-другой. Можно задать сразу и не отвечать на вопросы:
+Скрипт покажет план установки и даст его поправить — человек присутствует
+только на этом шаге, дальше всё идёт само:
 
-```powershell
-powershell -ExecutionPolicy Bypass -File $env:TEMP\oobe.ps1 `
-    -NasBaseUrl https://nas.dioservice.ru/install -NasUser deploy -NasPassword 'пароль'
+```
+================ План установки ================
+  Источник ПО      : https://nas.dioservice.ru/install (HTTP)
+  Учётная запись   : — (без аутентификации)
+  Пароль           : не задан
+  Программы        : 9
+      - 7-Zip
+      - Notepad++
+      - Adobe Acrobat Reader (64-bit)
+      - Google Chrome
+      - Яндекс Браузер для организаций
+      - КриптоПро CSP
+      - КриптоПро ЭЦП Browser plug-in
+      - Сертификаты УЦ СКБ Контур
+      - Aspia Host
+  Дополнительно    : VLC, Far Manager
+  Сертификаты      : Russian Trusted Root CA (Минцифры), Russian Trusted Sub CA (Минцифры)
+  Правки реестра   : 34
+  Office           : не ставим
+  Часовой пояс     : Russian Standard Time
+  Администратор    : Admin (пароль из файла ответов — смените после установки)
+===============================================
+  1 — продолжить          4 — пароль к раздаче
+  2 — адрес раздачи       5 — переключить HTTPS/SMB
+  3 — набор программ      6 — отмена
 ```
 
-Если раздача закрыта базовой аутентификацией, `-NasUser`/`-NasPassword` обязательны.
-Пароль сохраняется в `C:\ProgramData\oobe\nas.cred` с правами только для SYSTEM
-и администраторов. Для полностью автоматического прогона добавьте `-NoPrompt`.
+Пункт 3 открывает нумерованный список всех пакетов: номера через запятую
+(`1,3,5`), диапазоны (`1-4`), `all`, `none`; Enter оставляет набор по умолчанию.
+Пункт 4 спрашивает учётную запись и пароль к раздаче — пароль вводится скрыто
+и сохраняется в `C:\ProgramData\oobe\nas.cred` с правами только для SYSTEM и
+администраторов.
+
+Ответы складываются в `C:\ProgramData\oobe\postinstall.override.json`, который
+`postinstall.ps1` подхватит при первом входе. Сам `postinstall.json` править не
+нужно.
+
+Чтобы ничего не спрашивалось, задайте всё ключами:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File $env:TEMP\oobe.ps1 -NoPrompt `
+    -NasBaseUrl https://nas.dioservice.ru/install -NasUser deploy -NasPassword 'пароль'
+```
 
 Короткий вариант «в одну команду» из статьи-источника тоже работает, но
 скрипты здесь сохранены в UTF-8 **с BOM** (иначе Windows PowerShell 5.1
@@ -140,20 +174,23 @@ https://nas.dioservice.ru/install/
 Править `postinstall.json` для этого не нужно. Приоритет такой:
 
 ```
-postinstall.json  ->  nas.override.json  ->  ключи командной строки
+postinstall.json  ->  postinstall.override.json  ->  ключи командной строки
 ```
 
 | Как | Когда |
 |---|---|
-| `oobe.ps1` спросит адрес и запишет `nas.override.json` | Обычный прогон в OOBE: вводите адрес один раз, первый вход подхватит его сам |
-| `oobe.ps1 -NasBaseUrl … -NasType … -NasShare … -NasUser …` | Без вопросов; вместе с `-NoPrompt` — для автоматизации |
+| Экран плана в `oobe.ps1`, пункты 2/4/5 | Обычный прогон в OOBE: отвечаете один раз, первый вход подхватывает сам |
+| `oobe.ps1 -NasBaseUrl … -NasType … -NasShare … -NasUser … -NoPrompt` | Без вопросов, для автоматизации |
 | `postinstall.ps1 -NasBaseUrl …` | Ручной повторный запуск на уже настроенной машине |
 
-`nas.override.json` лежит в `C:\ProgramData\oobe\` рядом с конфигом и содержит
-только изменённые поля:
+`postinstall.override.json` лежит в `C:\ProgramData\oobe\` рядом с конфигом и
+содержит только изменённое — адрес, учётную запись и выбранный набор ПО:
 
 ```json
-{ "baseUrl": "https://backup.dioservice.ru/install", "user": "deploy" }
+{
+  "nas": { "baseUrl": "https://backup.dioservice.ru/install", "user": "deploy" },
+  "include": ["7-Zip", "Notepad++", "Google Chrome"]
+}
 ```
 
 ## Настройка `postinstall.json`
@@ -170,11 +207,14 @@ powershell -ExecutionPolicy Bypass -File .\postinstall.ps1 -Profiles base,browse
 
 | Профиль | Что входит |
 |---|---|
-| `base` | 7-Zip, Adobe Reader, Notepad++, сертификаты Минцифры, все правки реестра, системные настройки |
-| `browser` | Chrome, Яндекс Браузер для организаций |
-| `extra` | VLC, Far Manager — опционально, в базовый набор не входят |
-| `crypto` | КриптоПро CSP, КриптоПро ЭЦП Browser plug-in, сертификаты УЦ СКБ Контур |
-| `remote` | Aspia Host |
+| `base` | **Набор по умолчанию:** 7-Zip, Notepad++, Adobe Reader, Chrome, Яндекс Браузер, КриптоПро CSP, КриптоПро ЭЦП plug-in, сертификаты УЦ СКБ Контур, Aspia Host + сертификаты Минцифры, все правки реестра, системные настройки |
+| `extra` | **Дополнительные пакеты:** VLC, Far Manager — по умолчанию не ставятся |
+| `browser` | Chrome, Яндекс Браузер — для точечного прогона |
+| `crypto` | КриптоПро CSP, КриптоПро ЭЦП plug-in, сертификаты УЦ СКБ Контур — для точечного прогона |
+| `remote` | Aspia Host — для точечного прогона |
+
+Пакеты набора по умолчанию входят и в `base`, и в свою категорию: `-Profiles base`
+ставит всё перечисленное, `-Profiles crypto` — только криптографию.
 
 ### Выбор того, что ставить
 
@@ -196,9 +236,13 @@ powershell -ExecutionPolicy Bypass -File .\postinstall.ps1 -Profiles base,browse
 через запятую (`1,3,5`), диапазоны (`1-4`), `all`, `none`; пустой ввод оставляет
 набор по профилям.
 
-> `-Select` — только для ручного запуска. В `FirstLogonCommands` его задавать
-> нельзя: установка будет ждать ввода. Если консоль неинтерактивна, ключ
-> игнорируется с предупреждением, но полагаться на это не стоит.
+При ручном запуске `postinstall.ps1` печатает план и спрашивает подтверждение
+(Enter — продолжить, `n` — изменить набор, `q` — выход).
+
+> В `FirstLogonCommands` обязателен `-NoPrompt`, он там и стоит. Сеанс первого
+> входа интерактивный, поэтому без этого ключа установка остановилась бы на
+> вопросе, и человек увидел бы пустой рабочий стол. `-Select` там тоже
+> задавать нельзя.
 
 #### Пакеты, которых нет в winget
 

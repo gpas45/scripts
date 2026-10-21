@@ -23,7 +23,7 @@
       "Адрес можно сменить, не правя этот файл:",
       "  oobe.ps1 -NasBaseUrl https://другой.хост/install      (спросит и сам, если запущен вручную)",
       "  postinstall.ps1 -NasBaseUrl https://другой.хост/install",
-      "Переопределение попадает в nas.override.json рядом с конфигом.",
+      "Переопределение попадает в postinstall.override.json рядом с конфигом.",
       "",
       "Раздача доступна из интернета, а дистрибутивы КриптоПро, Контура и Яндекс",
       "Браузера распространяются по лицензии — закройте её базовой аутентификацией",
@@ -91,22 +91,22 @@
       ]
     },
     {
-      "name": "Adobe Acrobat Reader (64-bit)",
+      "name": "Notepad++",
       "source": "auto",
-      "wingetId": "Adobe.Acrobat.Reader.64-bit",
-      "nasPath": "AdobeReader/AcroRdrDCx64.exe",
-      "installerArgs": "/sAll /rs /msi EULA_ACCEPT=YES",
+      "wingetId": "Notepad++.Notepad++",
+      "nasPath": "NotepadPlusPlus/npp-x64.exe",
+      "installerArgs": "/S",
       "installerUrl": "",
       "profiles": [
         "base"
       ]
     },
     {
-      "name": "Notepad++",
+      "name": "Adobe Acrobat Reader (64-bit)",
       "source": "auto",
-      "wingetId": "Notepad++.Notepad++",
-      "nasPath": "NotepadPlusPlus/npp-x64.exe",
-      "installerArgs": "/S",
+      "wingetId": "Adobe.Acrobat.Reader.64-bit",
+      "nasPath": "AdobeReader/AcroRdrDCx64.exe",
+      "installerArgs": "/sAll /rs /msi EULA_ACCEPT=YES",
       "installerUrl": "",
       "profiles": [
         "base"
@@ -120,6 +120,7 @@
       "installerArgs": "/qn /norestart",
       "installerUrl": "",
       "profiles": [
+        "base",
         "browser"
       ]
     },
@@ -131,6 +132,7 @@
       "installerArgs": "/qn /norestart",
       "installerUrl": "",
       "profiles": [
+        "base",
         "browser"
       ],
       "_comment": [
@@ -143,41 +145,6 @@
       ]
     },
     {
-      "name": "VLC",
-      "source": "auto",
-      "wingetId": "VideoLAN.VLC",
-      "nasPath": "VLC/vlc-win64.exe",
-      "installerArgs": "/S",
-      "installerUrl": "",
-      "profiles": [
-        "extra"
-      ],
-      "_comment": "Опционально: ставится только при -Profiles ...,extra, в базовый набор не входит."
-    },
-    {
-      "name": "Far Manager",
-      "source": "auto",
-      "wingetId": "Far.Far",
-      "nasPath": "Far/Far-x64.msi",
-      "installerArgs": "/qn /norestart",
-      "installerUrl": "",
-      "profiles": [
-        "extra"
-      ]
-    },
-    {
-      "name": "КриптоПро ЭЦП Browser plug-in",
-      "source": "auto",
-      "wingetId": "",
-      "nasPath": "CryptoPro/cprocsp-pki-cades-x64.msi",
-      "installerArgs": "/qn /norestart",
-      "installerUrl": "",
-      "profiles": [
-        "crypto"
-      ],
-      "_comment": "wingetId пустой — заполните installerUrl ссылкой на дистрибутив с вашего файлового сервера."
-    },
-    {
       "name": "КриптоПро CSP",
       "source": "auto",
       "wingetId": "",
@@ -186,6 +153,7 @@
       "installerUrl": "",
       "timeoutSeconds": 900,
       "profiles": [
+        "base",
         "crypto"
       ],
       "_comment": [
@@ -198,6 +166,19 @@
       ]
     },
     {
+      "name": "КриптоПро ЭЦП Browser plug-in",
+      "source": "auto",
+      "wingetId": "",
+      "nasPath": "CryptoPro/cprocsp-pki-cades-x64.msi",
+      "installerArgs": "/qn /norestart",
+      "installerUrl": "",
+      "profiles": [
+        "base",
+        "crypto"
+      ],
+      "_comment": "wingetId пустой — заполните installerUrl ссылкой на дистрибутив с вашего файлового сервера."
+    },
+    {
       "name": "Сертификаты УЦ СКБ Контур",
       "source": "auto",
       "wingetId": "",
@@ -206,6 +187,7 @@
       "installerUrl": "",
       "timeoutSeconds": 300,
       "profiles": [
+        "base",
         "crypto"
       ],
       "_comment": [
@@ -232,12 +214,36 @@
       "installerUrl": "",
       "timeoutSeconds": 600,
       "profiles": [
+        "base",
         "remote"
       ],
       "_comment": [
         "Сборки: https://github.com/dchapyshev/aspia/releases — положите MSI на NAS.",
         "После установки хост настраивается отдельно (пароль/ID), иначе",
         "подключиться к машине не получится."
+      ]
+    },
+    {
+      "name": "VLC",
+      "source": "auto",
+      "wingetId": "VideoLAN.VLC",
+      "nasPath": "VLC/vlc-win64.exe",
+      "installerArgs": "/S",
+      "installerUrl": "",
+      "profiles": [
+        "extra"
+      ],
+      "_comment": "Опционально: ставится только при -Profiles ...,extra, в базовый набор не входит."
+    },
+    {
+      "name": "Far Manager",
+      "source": "auto",
+      "wingetId": "Far.Far",
+      "nasPath": "Far/Far-x64.msi",
+      "installerArgs": "/qn /norestart",
+      "installerUrl": "",
+      "profiles": [
+        "extra"
       ]
     }
   ],

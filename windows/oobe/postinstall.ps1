@@ -421,8 +421,18 @@ function Set-RegistryTweak {
     if (-not (Test-Path -LiteralPath $Tweak.path)) {
         New-Item -Path $Tweak.path -Force | Out-Null
     }
+
+    # Безымянное значение ключа (в regedit показывается как «(По умолчанию)»)
+    # задаётся только через Set-Item: именно так включается классическое
+    # контекстное меню Windows 11 — пустая строка в InprocServer32.
+    $name = if ($Tweak.PSObject.Properties['name']) { $Tweak.name } else { $null }
+    if ([string]::IsNullOrEmpty($name) -or $name -eq '(default)') {
+        Set-Item -LiteralPath $Tweak.path -Value $Tweak.value
+        return
+    }
+
     $type = if ($Tweak.PSObject.Properties['type'] -and $Tweak.type) { $Tweak.type } else { 'DWord' }
-    New-ItemProperty -LiteralPath $Tweak.path -Name $Tweak.name -PropertyType $type -Value $Tweak.value -Force | Out-Null
+    New-ItemProperty -LiteralPath $Tweak.path -Name $name -PropertyType $type -Value $Tweak.value -Force | Out-Null
 }
 
 function Set-SystemSetting {

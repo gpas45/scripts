@@ -144,7 +144,9 @@ powershell -ExecutionPolicy Bypass -File .\postinstall.ps1 -Profiles base,browse
 PowerShell, всё остальное запускается напрямую с `installerArgs`.
 Коды возврата `3010`/`1641` трактуются как «нужна перезагрузка», а не как ошибка.
 
-Правки реестра — тоже данные:
+### Правки реестра
+
+Тоже данные:
 
 ```json
 {
@@ -156,6 +158,30 @@ PowerShell, всё остальное запускается напрямую с
   "profiles": ["base"]
 }
 ```
+
+Безымянное значение ключа (в regedit — «(По умолчанию)») задаётся через
+`"name": "(default)"` либо пустым `name`. Так включается классическое
+контекстное меню Windows 11: пустая строка в `InprocServer32` под CLSID
+`{86CA1AA0-34AA-4E8B-A509-50C905BAE2A2}`. Эффект появляется после перезапуска
+Проводника — за это отвечает `system.restartExplorer`.
+
+Политики Windows Update занимают два разных раздела, и перепутать их легко:
+
+| Раздел | Что лежит |
+|---|---|
+| `…\Policies\Microsoft\Windows\WindowsUpdate` | Активные часы (`SetActiveHours`, `ActiveHoursStart/End`) и дедлайны (`SetComplianceDeadline`, `ConfigureDeadline*`) |
+| `…\Policies\Microsoft\Windows\WindowsUpdate\AU` | Расписание установки (`NoAutoUpdate`, `AUOptions`, `ScheduledInstall*`) и перезагрузки (`NoAutoRebootWithLoggedOnUsers`, `AlwaysAutoRebootAtScheduledTime`) |
+
+`SetComplianceDeadline = 1` обязателен: без него все `ConfigureDeadline*`
+игнорируются. Политики `AU` не действуют на Windows 10/11 Home — нужна
+редакция Pro или выше.
+
+Текущий набор: обновления ставятся по расписанию в 03:00 каждый день, активные
+часы 09:00–23:00, принудительных перезагрузок при вошедшем пользователе нет,
+дедлайны — 7 дней на крупные обновления, 5 на безопасность, 2 дня льготного
+периода.
+
+### Системные настройки
 
 Секция `system`: часовой пояс, раскладка по умолчанию, имя компьютера,
 отключение гибернации и засыпания от сети, RDP, перезапуск Проводника,

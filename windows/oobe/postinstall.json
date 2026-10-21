@@ -313,6 +313,176 @@
       "profiles": [
         "base"
       ]
+    },
+    {
+      "description": "Классическое контекстное меню Проводника (Windows 11); применяется после перезапуска Проводника",
+      "path": "HKCU:\\Software\\Classes\\CLSID\\{86CA1AA0-34AA-4E8B-A509-50C905BAE2A2}\\InprocServer32",
+      "name": "(default)",
+      "type": "String",
+      "value": "",
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "description": "Windows Update: управлять активными часами (не перезагружаться в этот период)",
+      "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsUpdate",
+      "name": "SetActiveHours",
+      "type": "DWord",
+      "value": 1,
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "description": "Windows Update: начало активных часов — 09:00",
+      "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsUpdate",
+      "name": "ActiveHoursStart",
+      "type": "DWord",
+      "value": 9,
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "description": "Windows Update: конец активных часов — 23:00",
+      "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsUpdate",
+      "name": "ActiveHoursEnd",
+      "type": "DWord",
+      "value": 23,
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "description": "Windows Update: автоматические обновления включены",
+      "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsUpdate\\AU",
+      "name": "NoAutoUpdate",
+      "type": "DWord",
+      "value": 0,
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "description": "Windows Update: 4 — загружать и устанавливать по расписанию",
+      "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsUpdate\\AU",
+      "name": "AUOptions",
+      "type": "DWord",
+      "value": 4,
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "description": "Windows Update: день установки — 0 (каждый день)",
+      "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsUpdate\\AU",
+      "name": "ScheduledInstallDay",
+      "type": "DWord",
+      "value": 0,
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "description": "Windows Update: время установки — 03:00",
+      "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsUpdate\\AU",
+      "name": "ScheduledInstallTime",
+      "type": "DWord",
+      "value": 3,
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "description": "Windows Update: устанавливать еженедельно при наличии обновлений (избыточно при ScheduledInstallDay = 0, оставлено как в исходном .reg)",
+      "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsUpdate\\AU",
+      "name": "ScheduledInstallEveryWeek",
+      "type": "DWord",
+      "value": 1,
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "description": "Windows Update: не перезагружать, если есть вошедшие пользователи",
+      "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsUpdate\\AU",
+      "name": "NoAutoRebootWithLoggedOnUsers",
+      "type": "DWord",
+      "value": 1,
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "description": "Windows Update: не перезагружать принудительно по наступлению расписания",
+      "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsUpdate\\AU",
+      "name": "AlwaysAutoRebootAtScheduledTime",
+      "type": "DWord",
+      "value": 0,
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "description": "Windows Update: включить дедлайны — без этого значения все Configure* ниже игнорируются (в исходном .reg его не было)",
+      "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsUpdate",
+      "name": "SetComplianceDeadline",
+      "type": "DWord",
+      "value": 1,
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "description": "Windows Update: следовать дедлайнам уведомлений вместо жёстких перезагрузок",
+      "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsUpdate",
+      "name": "ConfigureDeadlineNoAutoReboot",
+      "type": "DWord",
+      "value": 1,
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "description": "Windows Update: дедлайн для крупных обновлений (Feature Updates) — 7 дней",
+      "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsUpdate",
+      "name": "ConfigureDeadlineForFeatureUpdates",
+      "type": "DWord",
+      "value": 7,
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "description": "Windows Update: дедлайн для обновлений безопасности (Quality Updates) — 5 дней",
+      "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsUpdate",
+      "name": "ConfigureDeadlineForQualityUpdates",
+      "type": "DWord",
+      "value": 5,
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "description": "Windows Update: льготный период после дедлайна — 2 дня",
+      "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsUpdate",
+      "name": "ConfigureDeadlineGracePeriod",
+      "type": "DWord",
+      "value": 2,
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "description": "Windows Update: не перезагружать до подтверждения уведомления пользователем. Значение отсутствует в документации Microsoft и может игнорироваться — реальный эффект дают NoAutoRebootWithLoggedOnUsers и ConfigureDeadlineNoAutoReboot",
+      "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsUpdate",
+      "name": "OptionsForRebootNotifications",
+      "type": "DWord",
+      "value": 1,
+      "profiles": [
+        "base"
+      ]
     }
   ],
   "system": {

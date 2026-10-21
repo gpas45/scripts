@@ -13,14 +13,16 @@
 <unattend xmlns="urn:schemas-microsoft-com:unattend">
     <settings pass="oobeSystem">
         <component name="Microsoft-Windows-International-Core" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-            <!-- Раскладки: англоязычная по умолчанию + русская -->
+            <!-- Раскладки клавиатуры. Первая в списке — раскладка по умолчанию,
+                 поэтому ввод стартует английским; русская доступна переключением -->
             <InputLocale>en-US; ru-RU</InputLocale>
             <!-- Язык для не-Unicode программ (кодовая страница 1251): нужен 1С и старым приложениям -->
             <SystemLocale>ru-RU</SystemLocale>
-            <!-- Язык интерфейса и форматы даты/чисел. Для русских форматов (ДД.ММ.ГГГГ,
-                 запятая как разделитель) замените UserLocale на ru-RU -->
+            <!-- Язык интерфейса системы -->
             <UILanguage>en-US</UILanguage>
-            <UserLocale>en-US</UserLocale>
+            <!-- Региональные форматы: дата ДД.ММ.ГГГГ, запятая как десятичный
+                 разделитель, рубль как валюта — как требуется для 1С и бухгалтерии -->
+            <UserLocale>ru-RU</UserLocale>
         </component>
         <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
             <!-- Часовой пояс. Без него OOBE определяет его сам по региону/сети.

@@ -435,6 +435,21 @@ function Set-SystemSetting {
         }
     }
 
+    if ($Settings.defaultInputLanguage) {
+        # InputLocale в файле ответов задаёт порядок раскладок, но при UserLocale
+        # ru-RU Windows иногда делает русскую раскладкой по умолчанию. Закрепляем.
+        Invoke-Safely -Label "раскладка по умолчанию $($Settings.defaultInputLanguage)" -Action {
+            $tips = @{ 'en-US' = '0409:00000409'; 'ru-RU' = '0419:00000419' }
+            $tip = if ($tips.ContainsKey($Settings.defaultInputLanguage)) {
+                $tips[$Settings.defaultInputLanguage]
+            }
+            else {
+                $Settings.defaultInputLanguage
+            }
+            Set-WinDefaultInputMethodOverride -InputTip $tip -ErrorAction Stop
+        }
+    }
+
     if ($Settings.disableHibernation) {
         Invoke-Safely -Label 'отключение гибернации' -Action {
             & powercfg.exe /hibernate off

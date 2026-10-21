@@ -18,8 +18,11 @@
             <InputLocale>en-US; ru-RU</InputLocale>
             <!-- Язык для не-Unicode программ (кодовая страница 1251): нужен 1С и старым приложениям -->
             <SystemLocale>ru-RU</SystemLocale>
-            <!-- Язык интерфейса системы -->
-            <UILanguage>en-US</UILanguage>
+            <!-- Язык интерфейса системы. Требует, чтобы русский языковой пакет
+                 был в образе: на англоязычном образе ставьте ru-RU отдельно,
+                 иначе применится UILanguageFallback -->
+            <UILanguage>ru-RU</UILanguage>
+            <UILanguageFallback>en-US</UILanguageFallback>
             <!-- Региональные форматы: дата ДД.ММ.ГГГГ, запятая как десятичный
                  разделитель, рубль как валюта — как требуется для 1С и бухгалтерии -->
             <UserLocale>ru-RU</UserLocale>

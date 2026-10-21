@@ -37,10 +37,10 @@ powershell -ExecutionPolicy Bypass -File $env:TEMP\oobe.ps1
 
 ```
 ================ План установки ================
-  Источник ПО      : https://install.dioservice.ru/install (HTTP)
+  Источник ПО      : https://oobe.dioservice.ru/deploy (HTTP)
   Учётная запись   : deploy
   Пароль           : задан
-  Доступ к раздаче : ОК — HTTP 200, https://install.dioservice.ru/install/7-Zip/7z-x64.msi
+  Доступ к раздаче : ОК — HTTP 200, https://oobe.dioservice.ru/deploy/7-Zip/7z-x64.msi
   Программы        : 9
       - 7-Zip
       - Notepad++
@@ -101,7 +101,7 @@ powershell -ExecutionPolicy Bypass -File $env:TEMP\oobe.ps1
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File $env:TEMP\oobe.ps1 -NoPrompt `
-    -NasBaseUrl https://install.dioservice.ru/install -NasUser deploy -NasPassword 'пароль'
+    -NasBaseUrl https://oobe.dioservice.ru/deploy -NasUser deploy -NasPassword 'пароль'
 ```
 
 Короткий вариант «в одну команду» из статьи-источника тоже работает, но
@@ -138,7 +138,7 @@ powershell -c "iex ((irm https://raw.githubusercontent.com/gpas45/scripts/main/w
 Ожидаемая раскладка раздачи (пути задаются в `software[].nasPath`):
 
 ```
-https://install.dioservice.ru/install/
+https://oobe.dioservice.ru/deploy/
 ├─ 7-Zip\7z-x64.msi
 ├─ AdobeReader\AcroRdrDCx64.exe
 ├─ NotepadPlusPlus\npp-x64.exe
@@ -165,20 +165,75 @@ https://install.dioservice.ru/install/
 ### Вариант по умолчанию: HTTPS (`"type": "http"`)
 
 Установка идёт за пределами локальной сети, поэтому по умолчанию дистрибутивы
-забираются по HTTPS с `https://install.dioservice.ru/install`.
+забираются по HTTPS с `https://oobe.dioservice.ru/deploy`.
 
 Имя у HTTPS-раздачи отдельное, и это намеренно: `nas.dioservice.ru` остаётся за
 интерфейсом DSM и SMB (внутри сети оно резолвится прямо в NAS), а
-`install.dioservice.ru` ведёт на обратный прокси, который отдаёт WebDAV.
+`oobe.dioservice.ru` ведёт на обратный прокси, который отдаёт WebDAV.
 
-На Synology: раздайте папку `install` через **Web Station** (или File Station) и
-выпустите сертификат Let's Encrypt средствами DSM. Если сертификат
-самоподписанный, можно поставить `"ignoreCertErrors": true`, но с публичным
-адресом это лишнее.
+Схема доступа:
+
+```
+клиент --HTTPS--> oobe.dioservice.ru (Traefik) --HTTPS 5006--> nas.dioservice.ru (WebDAV)
+```
+
+На Synology:
+
+1. **Центр пакетов** → установите **WebDAV Server**, включите в нём HTTPS
+   (порт 5006). Общая папка `deploy` отдаётся по адресу `/deploy/...` — имя
+   папки и есть первый сегмент пути, поэтому никаких переписываний пути
+   в Traefik не нужно.
+2. **Панель управления → Пользователь и группа** → учётная запись `deploy`:
+   на вкладке **Разрешения** папка `deploy` только на чтение, остальные — нет
+   доступа; на вкладке **Приложения** разрешены только WebDAV и, если
+   разворачиваете ещё и изнутри сети, SMB. Вход в DSM запретите, 2FA не
+   включайте — с ней WebDAV не работает.
+3. **Панель управления → Безопасность → Брандмауэр** — порт 5006 открыть
+   только адресу Traefik.
+4. **Панель управления → Безопасность → Доверенные прокси** — добавьте адрес
+   Traefik, иначе автоблокировка DSM при переборе пароля заблокирует сам
+   Traefik и отвалятся все внешние установки сразу.
+
+Обратный прокси DSM для этого не нужен и не получится: он маршрутизирует
+только по паре имя+порт, без путей, а `nas.dioservice.ru:443` уже занято
+интерфейсом DSM.
+
+Пример конфигурации Traefik (file provider; NAS не контейнер, метки Docker
+здесь не применимы):
+
+```yaml
+http:
+  routers:
+    oobe-deploy:
+      rule: "Host(`oobe.dioservice.ru`) && PathPrefix(`/deploy`)"
+      entryPoints:
+        - websecure
+      service: nas-webdav
+      tls:
+        certResolver: letsencrypt
+
+  services:
+    nas-webdav:
+      loadBalancer:
+        passHostHeader: true
+        serversTransport: nas-tls
+        servers:
+          - url: "https://nas.dioservice.ru:5006"
+
+  serversTransports:
+    nas-tls:
+      serverName: "nas.dioservice.ru"
+      insecureSkipVerify: true   # убрать, когда на DSM будет валидный сертификат
+```
+
+`nas.dioservice.ru` в адресе backend безопасно только потому, что внутри сети
+это имя резолвится прямо в NAS. Имя самой раздачи (`oobe.dioservice.ru`) так
+писать нельзя — Traefik получит собственный адрес и запрос уйдёт в петлю.
 
 Раздача закрывается базовой аутентификацией: заполните `nas.user` и передайте
 пароль через `-NasPassword` либо файл `nas.cred`. Скрипт отправляет заголовок
-`Authorization` сразу, не дожидаясь ответа 401.
+`Authorization` сразу, не дожидаясь ответа 401. Проверять аутентификацию должен
+DSM — Traefik пробрасывает заголовок `Authorization` дальше сам.
 
 > ⚠️ Раздача доступна из интернета, а дистрибутивы КриптоПро, Контура и Яндекс
 > Браузера распространяются по лицензии. Закройте её базовой аутентификацией
@@ -190,7 +245,7 @@ https://install.dioservice.ru/install/
 Для развёртывания внутри сети или через VPN. Поменяйте `nas.type` на `smb` —
 путь берётся из `nas.share`.
 
-На NAS: **Панель управления → Общая папка** → папка `install`, и
+На NAS: **Панель управления → Общая папка** → папка `deploy`, и
 **Пользователь и группа** → учётная запись `deploy` с правом **только на чтение**.
 Пароль передаётся так же, как для HTTPS.
 
@@ -217,7 +272,7 @@ postinstall.json  ->  postinstall.override.json  ->  ключи командно
 
 ```json
 {
-  "nas": { "baseUrl": "https://backup.dioservice.ru/install", "user": "deploy" },
+  "nas": { "baseUrl": "https://backup.dioservice.ru/deploy", "user": "deploy" },
   "include": ["7-Zip", "Notepad++", "Google Chrome"]
 }
 ```

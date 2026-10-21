@@ -685,27 +685,42 @@ function Install-FromFile {
     param(
         [string]$Path,
         [string]$Arguments,
-        [int]$TimeoutSeconds = 1800
+        [int]$TimeoutSeconds = 1800,
+        [switch]$StdinNull
     )
     $extension = [IO.Path]::GetExtension($Path).ToLowerInvariant()
 
+    $start = @{ PassThru = $true }
+
     if ($extension -eq '.msi') {
-        $msiArgs = if ($Arguments) { "/i `"$Path`" $Arguments" } else { "/i `"$Path`" /qn /norestart" }
-        $proc = Start-Process -FilePath 'msiexec.exe' -ArgumentList $msiArgs -PassThru
+        $start['FilePath'] = 'msiexec.exe'
+        $start['ArgumentList'] = if ($Arguments) { "/i `"$Path`" $Arguments" } else { "/i `"$Path`" /qn /norestart" }
     }
     elseif ($extension -eq '.ps1') {
-        $proc = Start-Process -FilePath 'powershell.exe' -PassThru `
-            -ArgumentList @('-ExecutionPolicy', 'Bypass', '-NoProfile', '-File', $Path)
-    }
-    elseif ($Arguments) {
-        $proc = Start-Process -FilePath $Path -ArgumentList $Arguments -PassThru
+        $start['FilePath'] = 'powershell.exe'
+        $start['ArgumentList'] = @('-ExecutionPolicy', 'Bypass', '-NoProfile', '-File', $Path)
     }
     else {
-        $proc = Start-Process -FilePath $Path -PassThru
+        $start['FilePath'] = $Path
+        if ($Arguments) { $start['ArgumentList'] = $Arguments }
     }
 
-    # Ждём с ограничением: установщик, который спросил что-нибудь у пользователя,
-    # иначе навсегда подвесит первый вход в систему.
+    if ($StdinNull) {
+        # Консольные установщики любят заканчивать «нажмите любую клавишу»
+        # (это cmd-шный pause, он читает stdin). При автоматическом прогоне
+        # нажимать некому, поэтому подсовываем пустой ввод — pause сразу
+        # получает конец файла и программа завершается.
+        $empty = Join-Path -Path $script:WorkDir -ChildPath 'empty.in'
+        if (-not (Test-Path -LiteralPath $empty)) {
+            New-Item -ItemType File -Path $empty -Force | Out-Null
+        }
+        $start['RedirectStandardInput'] = $empty
+    }
+
+    $proc = Start-Process @start
+
+    # Ждём с ограничением: установщик, который всё-таки спросил что-то
+    # у пользователя, иначе навсегда подвесит первый вход в систему.
     if (-not $proc.WaitForExit($TimeoutSeconds * 1000)) {
         try { $proc.Kill() } catch { Write-Warning '  не удалось снять зависший процесс.' }
         throw "установщик не завершился за $TimeoutSeconds с и был прерван."
@@ -721,40 +736,53 @@ function Install-FromFile {
     if ($code -ne 0) { throw "установщик вернул код $code." }
 }
 
-function Copy-ApplicationConfig {
+function Invoke-PostInstallStep {
     param(
         $Item,
         $Nas
     )
-    if (-not $Item.PSObject.Properties['configFiles'] -or -not $Item.configFiles) { return }
+    if (-not $Item.PSObject.Properties['postInstall'] -or -not $Item.postInstall) { return }
+    $step = $Item.postInstall
+    if (-not $step.executable) { return }
 
-    foreach ($entry in $Item.configFiles) {
-        if (-not $entry.nasPath -or -not $entry.destination) { continue }
-
-        $source = Get-NasFile -Nas $Nas -RelativePath $entry.nasPath
-        if (-not $source) {
-            Write-Warning "  конфиг $($entry.nasPath) на источнике не найден — пропускаю."
-            continue
-        }
-
-        $destination = [Environment]::ExpandEnvironmentVariables($entry.destination)
-        $directory = Split-Path -Parent $destination
-        if ($directory -and -not (Test-Path -LiteralPath $directory)) {
-            New-Item -ItemType Directory -Force -Path $directory | Out-Null
-        }
-        Copy-Item -LiteralPath $source -Destination $destination -Force
-        Write-Host "  конфиг положен в $destination"
+    $executable = [Environment]::ExpandEnvironmentVariables($step.executable)
+    if (-not (Test-Path -LiteralPath $executable)) {
+        # Путь установки у разных сборок отличается — ищем по имени файла.
+        $name = Split-Path -Leaf $executable
+        $roots = @($env:ProgramFiles, ${env:ProgramFiles(x86)}) | Where-Object { $_ }
+        $executable = Get-ChildItem -Path $roots -Filter $name -Recurse -ErrorAction SilentlyContinue |
+            Select-Object -First 1 -ExpandProperty FullName
+    }
+    if (-not $executable) {
+        throw "шаг после установки: не найден $($step.executable)."
     }
 
-    if ($Item.PSObject.Properties['restartService'] -and $Item.restartService) {
-        $service = Get-Service -Name $Item.restartService -ErrorAction SilentlyContinue
-        if (-not $service) {
-            Write-Warning "  служба $($Item.restartService) не найдена — настройки подхватятся после перезагрузки."
+    $arguments = $step.arguments
+    if ($step.nasPath) {
+        $file = Get-NasFile -Nas $Nas -RelativePath $step.nasPath
+        if (-not $file) {
+            throw "шаг после установки: на источнике нет файла $($step.nasPath)."
         }
-        else {
-            Restart-Service -Name $Item.restartService -Force -ErrorAction Stop
-            Write-Host "  служба $($Item.restartService) перезапущена"
-        }
+        # Обычная подстановка, а не -replace: в пути есть обратные слеши.
+        $arguments = $arguments.Replace('{file}', $file)
+    }
+
+    $timeout = if ($step.PSObject.Properties['timeoutSeconds'] -and $step.timeoutSeconds) {
+        [int]$step.timeoutSeconds
+    }
+    else {
+        300
+    }
+
+    Write-Host "  после установки: $executable $arguments"
+    $proc = Start-Process -FilePath $executable -ArgumentList $arguments -PassThru
+    if (-not $proc.WaitForExit($timeout * 1000)) {
+        try { $proc.Kill() } catch { Write-Warning '  не удалось снять зависший процесс.' }
+        throw "шаг после установки не завершился за $timeout с и был прерван."
+    }
+    $proc.WaitForExit()
+    if ($proc.ExitCode -ne 0) {
+        throw "шаг после установки вернул код $($proc.ExitCode)."
     }
 }
 
@@ -771,6 +799,7 @@ function Install-Application {
     else {
         1800
     }
+    $stdinNull = [bool]($Item.PSObject.Properties['stdinNull'] -and $Item.stdinNull)
 
     if (($source -eq 'auto' -or $source -eq 'nas') -and $Item.nasPath) {
         if (-not $nasReady) {
@@ -783,8 +812,9 @@ function Install-Application {
             $file = Get-NasFile -Nas $Nas -RelativePath $Item.nasPath
             if ($file) {
                 Test-FileChecksum -Path $file -Checksums $Item.checksums
-                Install-FromFile -Path $file -Arguments $Item.installerArgs -TimeoutSeconds $timeout
+                Install-FromFile -Path $file -Arguments $Item.installerArgs -TimeoutSeconds $timeout -StdinNull:$stdinNull
                 Copy-ApplicationConfig -Item $Item -Nas $Nas
+                Invoke-PostInstallStep -Item $Item -Nas $Nas
                 return
             }
             if ($source -eq 'nas') {
@@ -797,6 +827,7 @@ function Install-Application {
     if (($source -eq 'auto' -or $source -eq 'winget') -and $Item.wingetId) {
         Install-WithWinget -Id $Item.wingetId
         Copy-ApplicationConfig -Item $Item -Nas $Nas
+        Invoke-PostInstallStep -Item $Item -Nas $Nas
         return
     }
 
@@ -805,8 +836,9 @@ function Install-Application {
         $dest = Join-Path -Path $script:WorkDir -ChildPath $name
         Invoke-WebRequest -Uri $Item.installerUrl -OutFile $dest -UseBasicParsing
         Test-FileChecksum -Path $dest -Checksums $Item.checksums
-        Install-FromFile -Path $dest -Arguments $Item.installerArgs -TimeoutSeconds $timeout
+        Install-FromFile -Path $dest -Arguments $Item.installerArgs -TimeoutSeconds $timeout -StdinNull:$stdinNull
         Copy-ApplicationConfig -Item $Item -Nas $Nas
+        Invoke-PostInstallStep -Item $Item -Nas $Nas
         return
     }
 

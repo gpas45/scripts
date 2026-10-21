@@ -244,24 +244,25 @@
       "nasPath": "Kontur/Certificates_Kontur_Admin.exe",
       "installerArgs": "",
       "installerUrl": "",
+      "stdinNull": true,
       "timeoutSeconds": 300,
       "profiles": [
         "base",
         "crypto"
       ],
       "_comment": [
-        "SKBKontur.InstallCertificates (вариант сборки Kontur_Admin): консольная",
-        "утилита, сертификаты УЦ Контура зашиты в неё, ставит их в хранилища",
-        "локального компьютера. Требует прав администратора — FirstLogonCommands",
-        "их даёт. Запускается без аргументов; у неё есть и свои команды",
-        "(help, добавление из каталога, удаление) — посмотрите вывод",
-        "Certificates_Kontur_Admin.exe /? на тестовой машине.",
+        "SKBKontur.InstallCertificates (сборка Kontur_Admin): консольная утилита,",
+        "сертификаты УЦ Контура зашиты в неё, ставит их в хранилища локального",
+        "компьютера. Требует прав администратора — FirstLogonCommands их даёт.",
+        "Запускается без аргументов.",
+        "stdinNull: утилита заканчивает работу строкой «Для продолжения нажмите",
+        "любую клавишу» — это cmd-шный pause, он читает stdin. При автоматическом",
+        "прогоне нажимать некому, поэтому ей подсовывается пустой ввод, и она",
+        "завершается сама. Без этого шаг висел бы до timeoutSeconds и помечался",
+        "ошибкой, хотя сертификаты уже установлены.",
         "Файл в репозиторий не кладётся: берите его в личном кабинете Контура",
         "и размещайте на NAS. SHA256 присланного вами файла",
-        "554d8c4d8fc95b9791fc6cc843c82327e4e7bc4809f994a6049fde81f3161f19",
-        "Если утилита ждёт нажатия клавиши, первый вход на ней зависнет —",
-        "поэтому стоит timeoutSeconds: по его истечении процесс снимается,",
-        "шаг помечается ошибкой, а остальная настройка продолжается."
+        "554d8c4d8fc95b9791fc6cc843c82327e4e7bc4809f994a6049fde81f3161f19"
       ]
     },
     {
@@ -271,13 +272,12 @@
       "nasPath": "Aspia/aspia-host-x86_64.msi",
       "installerArgs": "/qn /norestart",
       "installerUrl": "",
-      "configFiles": [
-        {
-          "nasPath": "Aspia/host.ini",
-          "destination": "%ProgramData%\\aspia\\host.ini"
-        }
-      ],
-      "restartService": "",
+      "postInstall": {
+        "nasPath": "Aspia/aspia-host-config.json",
+        "executable": "%ProgramFiles%\\Aspia\\Host\\aspia_host.exe",
+        "arguments": "--import \"{file}\" --silent",
+        "timeoutSeconds": 180
+      },
       "timeoutSeconds": 600,
       "profiles": [
         "base",
@@ -285,16 +285,13 @@
       ],
       "_comment": [
         "Сборки: https://github.com/dchapyshev/aspia/releases — положите MSI на NAS.",
-        "Установщик не подхватывает конфиг из своей папки: Aspia читает настройки",
-        "оттуда, куда их кладёт Qt. Хост работает службой и держит системные",
-        "настройки в QSettings (IniFormat, SystemScope, организация aspia,",
-        "приложение host), то есть в %ProgramData%\\aspia\\host.ini.",
-        "Поэтому конфиг копируется явно через configFiles — положите host.ini",
-        "рядом с дистрибутивом на NAS.",
-        "Если у вашей сборки файл называется иначе, поправьте nasPath и destination.",
-        "restartService: имя службы Aspia, чтобы перечитала настройки. Узнать:",
-        "Get-Service *aspia* | Select-Object Name, DisplayName",
-        "Пароль и ID хоста настраиваются отдельно, установщик их не задаёт."
+        "Конфиг не копируется, а импортируется: у хоста есть ключи --import и",
+        "--silent (видно в source/host/main.cc), поэтому после установки",
+        "выполняется aspia_host.exe --import <файл> --silent.",
+        "Файл aspia-host-config.json кладётся на NAS рядом с дистрибутивом.",
+        "executable: если путь не существует, исполняемый файл ищется по имени",
+        "в Program Files — у разных сборок каталог отличается.",
+        "{file} в arguments заменяется на путь к скачанному конфигу."
       ]
     },
     {

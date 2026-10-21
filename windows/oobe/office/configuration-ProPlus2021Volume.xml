@@ -1,0 +1,40 @@
+<!--
+  Office LTSC Professional Plus 2021 (томовая лицензия) для Office Deployment Tool.
+  Применяется так: setup.exe /configure configuration-ProPlus2021Volume.xml
+  Справочник параметров:
+  https://learn.microsoft.com/ru-ru/microsoft-365-apps/deploy/office-deployment-tool-configuration-options
+
+  Активация: PIDKEY ниже — публичный KMS-клиентский ключ Microsoft. Он нужен
+  только при активации через KMS/AD. Для MAK укажите свой ключ, для AD-based
+  активации PIDKEY не нужен вовсе. Список ключей:
+  https://learn.microsoft.com/ru-ru/deployoffice/vlactivation/gvlks
+-->
+<Configuration ID="ltsc2021-proplus-ru">
+    <Add OfficeClientEdition="64" Channel="PerpetualVL2021" MigrateArch="TRUE">
+        <Product ID="ProPlus2021Volume">
+            <!-- <Product ID="ProPlus2021Volume" PIDKEY="FXYTK-NJJ8C-GB6DW-3DYQT-6F7TH"> -->
+            <Language ID="ru-ru" />
+            <Language ID="en-us" />
+            <ExcludeApp ID="Groove" />
+            <ExcludeApp ID="Lync" />
+            <ExcludeApp ID="OneDrive" />
+            <ExcludeApp ID="Publisher" />
+            <ExcludeApp ID="Access" />
+            <ExcludeApp ID="OneNote" />
+        </Product>
+    </Add>
+
+    <!-- Удалить ранее установленные MSI-версии Office -->
+    <RemoveMSI />
+
+    <Updates Enabled="TRUE" Channel="PerpetualVL2021" />
+
+    <Property Name="SharedComputerLicensing" Value="0" />
+    <Property Name="FORCEAPPSHUTDOWN" Value="TRUE" />
+    <Property Name="DeviceBasedLicensing" Value="0" />
+    <Property Name="PinIconsToTaskbar" Value="FALSE" />
+
+    <!-- Тихая установка без интерфейса и без вопросов про лицензионное соглашение -->
+    <Display Level="None" AcceptEULA="TRUE" />
+    <Logging Level="Standard" Path="%ProgramData%\oobe" />
+</Configuration>

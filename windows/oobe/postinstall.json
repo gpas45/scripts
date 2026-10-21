@@ -1,0 +1,327 @@
+{
+  "_comment": [
+    "Конфигурация postinstall.ps1 — ПО, правки реестра и системные настройки.",
+    "Правьте этот файл, а не скрипт. Каждый элемент может иметь поле profiles:",
+    "применяется, только если профиль передан в -Profiles (по умолчанию base).",
+    "Элемент без profiles применяется всегда."
+  ],
+  "nas": {
+    "_comment": [
+      "Synology NAS как источник дистрибутивов. Приоритет для software.source = auto:",
+      "NAS -> winget -> installerUrl.",
+      "type = smb  — общая папка по UNC (\\\\nas\\install). Нужна учётная запись с правом",
+      "              только на чтение: Windows 10/11 по умолчанию запрещает гостевой вход в SMB.",
+      "type = http — раздача по HTTP(S) через Web Station / File Station (без SMB-аутентификации).",
+      "Пароль в репозиторий не кладём: передайте -NasPassword либо положите файл рядом",
+      "со скриптом (passwordFile) и ограничьте на него NTFS-права."
+    ],
+    "enabled": true,
+    "type": "smb",
+    "share": "\\\\nas.local\\install",
+    "baseUrl": "https://nas.local/install",
+    "ignoreCertErrors": false,
+    "user": "deploy",
+    "passwordFile": "nas.cred",
+    "waitForNetworkSeconds": 120
+  },
+  "software": [
+    {
+      "name": "7-Zip",
+      "source": "auto",
+      "wingetId": "7zip.7zip",
+      "nasPath": "7-Zip/7z-x64.msi",
+      "installerArgs": "/qn /norestart",
+      "installerUrl": "",
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "name": "Adobe Acrobat Reader (64-bit)",
+      "source": "auto",
+      "wingetId": "Adobe.Acrobat.Reader.64-bit",
+      "nasPath": "AdobeReader/AcroRdrDCx64.exe",
+      "installerArgs": "/sAll /rs /msi EULA_ACCEPT=YES",
+      "installerUrl": "",
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "name": "Notepad++",
+      "source": "auto",
+      "wingetId": "Notepad++.Notepad++",
+      "nasPath": "NotepadPlusPlus/npp-x64.exe",
+      "installerArgs": "/S",
+      "installerUrl": "",
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "name": "Google Chrome",
+      "source": "auto",
+      "wingetId": "Google.Chrome",
+      "nasPath": "Chrome/GoogleChromeStandaloneEnterprise64.msi",
+      "installerArgs": "/qn /norestart",
+      "installerUrl": "",
+      "profiles": [
+        "browser"
+      ]
+    },
+    {
+      "name": "Mozilla Firefox",
+      "source": "auto",
+      "wingetId": "Mozilla.Firefox",
+      "nasPath": "Firefox/FirefoxSetup-x64.msi",
+      "installerArgs": "/qn /norestart",
+      "installerUrl": "",
+      "profiles": [
+        "browser"
+      ]
+    },
+    {
+      "name": "VLC",
+      "source": "auto",
+      "wingetId": "VideoLAN.VLC",
+      "nasPath": "VLC/vlc-win64.exe",
+      "installerArgs": "/S",
+      "installerUrl": "",
+      "profiles": [
+        "extra"
+      ]
+    },
+    {
+      "name": "Far Manager",
+      "source": "auto",
+      "wingetId": "Far.Far",
+      "nasPath": "Far/Far-x64.msi",
+      "installerArgs": "/qn /norestart",
+      "installerUrl": "",
+      "profiles": [
+        "extra"
+      ]
+    },
+    {
+      "name": "AnyDesk",
+      "source": "auto",
+      "wingetId": "AnyDeskSoftwareGmbH.AnyDesk",
+      "nasPath": "AnyDesk/AnyDesk.exe",
+      "installerArgs": "--install \"C:\\Program Files (x86)\\AnyDesk\" --start-with-win --silent",
+      "installerUrl": "",
+      "profiles": [
+        "remote"
+      ]
+    },
+    {
+      "name": "КриптоПро ЭЦП Browser plug-in",
+      "source": "auto",
+      "wingetId": "",
+      "nasPath": "CryptoPro/cprocsp-pki-cades-x64.msi",
+      "installerArgs": "/qn /norestart",
+      "installerUrl": "",
+      "profiles": [
+        "crypto"
+      ],
+      "_comment": "wingetId пустой — заполните installerUrl ссылкой на дистрибутив с вашего файлового сервера."
+    }
+  ],
+  "office": {
+    "_comment": [
+      "mode = odt   — Office Deployment Tool + configuration.xml (Office LTSC, тома).",
+      "mode = winget — Microsoft 365 Apps из winget (розничная лицензия).",
+      "Выбор редакции и способа активации за вами, поэтому по умолчанию enabled=false.",
+      "setupNasPath/configNasPath — пути внутри раздачи NAS; если пусто, ODT ставится",
+      "через winget (Microsoft.OfficeDeploymentTool), а конфиг берётся из configUri."
+    ],
+    "enabled": false,
+    "mode": "odt",
+    "wingetId": "Microsoft.Office",
+    "setupNasPath": "Office/ODT/setup.exe",
+    "configNasPath": "Office/ODT/configuration-ProPlus2021Volume.xml",
+    "setupPath": "",
+    "configPath": "",
+    "configUri": "https://raw.githubusercontent.com/gpas45/scripts/main/windows/oobe/office/configuration-ProPlus2021Volume.xml"
+  },
+  "registry": [
+    {
+      "description": "Показывать расширения файлов",
+      "path": "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced",
+      "name": "HideFileExt",
+      "type": "DWord",
+      "value": 0,
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "description": "Показывать скрытые файлы",
+      "path": "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced",
+      "name": "Hidden",
+      "type": "DWord",
+      "value": 1,
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "description": "Проводник открывается на «Этот компьютер»",
+      "path": "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced",
+      "name": "LaunchTo",
+      "type": "DWord",
+      "value": 1,
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "description": "Кнопки панели задач слева (Windows 11)",
+      "path": "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced",
+      "name": "TaskbarAl",
+      "type": "DWord",
+      "value": 0,
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "description": "Убрать виджеты с панели задач (Windows 11)",
+      "path": "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced",
+      "name": "TaskbarDa",
+      "type": "DWord",
+      "value": 0,
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "description": "Убрать чат Teams с панели задач (Windows 11)",
+      "path": "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced",
+      "name": "TaskbarMn",
+      "type": "DWord",
+      "value": 0,
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "description": "Не предлагать «Давайте завершим настройку устройства»",
+      "path": "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\UserProfileEngagement",
+      "name": "ScoobeSystemSettingEnabled",
+      "type": "DWord",
+      "value": 0,
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "description": "Не доустанавливать рекламные приложения в Пуск",
+      "path": "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\ContentDeliveryManager",
+      "name": "SilentInstalledAppsEnabled",
+      "type": "DWord",
+      "value": 0,
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "description": "Не показывать рекомендации в Пуске",
+      "path": "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\ContentDeliveryManager",
+      "name": "SystemPaneSuggestionsEnabled",
+      "type": "DWord",
+      "value": 0,
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "description": "Отключить потребительские функции (рекламные приложения)",
+      "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\CloudContent",
+      "name": "DisableWindowsConsumerFeatures",
+      "type": "DWord",
+      "value": 1,
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "description": "Минимальная телеметрия (Pro/Enterprise; в Home значение поднимается до 1)",
+      "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\DataCollection",
+      "name": "AllowTelemetry",
+      "type": "DWord",
+      "value": 0,
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "description": "Отключить веб-поиск в меню Пуск",
+      "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\Windows Search",
+      "name": "DisableWebSearch",
+      "type": "DWord",
+      "value": 1,
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "description": "Поддержка путей длиннее 260 символов",
+      "path": "HKLM:\\SYSTEM\\CurrentControlSet\\Control\\FileSystem",
+      "name": "LongPathsEnabled",
+      "type": "DWord",
+      "value": 1,
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "description": "Отключить быстрый запуск (мешает установке обновлений и выключению)",
+      "path": "HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Power",
+      "name": "HiberbootEnabled",
+      "type": "DWord",
+      "value": 0,
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "description": "Пропустить первый запуск Microsoft Edge",
+      "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Edge",
+      "name": "HideFirstRunExperience",
+      "type": "DWord",
+      "value": 1,
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "description": "Adobe Reader: не предлагать платные подписки",
+      "path": "HKLM:\\SOFTWARE\\Policies\\Adobe\\Acrobat Reader\\DC\\FeatureLockDown",
+      "name": "bAcroSuppressUpsell",
+      "type": "DWord",
+      "value": 1,
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "description": "Adobe Reader: отключить собственный автообновляльщик (обновляем через winget)",
+      "path": "HKLM:\\SOFTWARE\\Policies\\Adobe\\Acrobat Reader\\DC\\FeatureLockDown",
+      "name": "bUpdater",
+      "type": "DWord",
+      "value": 0,
+      "profiles": [
+        "base"
+      ]
+    }
+  ],
+  "system": {
+    "timeZone": "Russian Standard Time",
+    "computerName": "",
+    "disableHibernation": true,
+    "neverSleepOnAc": true,
+    "enableRdp": false,
+    "restartExplorer": true,
+    "rebootWhenDone": false
+  }
+}

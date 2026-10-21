@@ -591,6 +591,66 @@ function Install-WithWinget {
     }
 }
 
+function Test-FileChecksum {
+    param(
+        [string]$Path,
+        $Checksums
+    )
+    if (-not $Checksums) { return }
+
+    $requested = 0
+    $verified = @()
+
+    foreach ($algorithm in @('SHA256', 'SHA1', 'MD5')) {
+        $property = $Checksums.PSObject.Properties[$algorithm.ToLowerInvariant()]
+        if (-not $property -or [string]::IsNullOrWhiteSpace($property.Value)) { continue }
+        $requested++
+        $expected = ($property.Value -replace '[\s:-]', '').ToUpperInvariant()
+        $actual = (Get-FileHash -LiteralPath $Path -Algorithm $algorithm).Hash.ToUpperInvariant()
+        if ($actual -ne $expected) {
+            throw "контрольная сумма $algorithm не совпала: ожидалась $expected, у файла $actual."
+        }
+        $verified += $algorithm
+    }
+
+    $gost = $Checksums.PSObject.Properties['gost2012_256']
+    if ($gost -and -not [string]::IsNullOrWhiteSpace($gost.Value)) {
+        $requested++
+        # Get-FileHash ГОСТ не умеет. Считает его только cpverify из состава
+        # КриптоПро CSP, то есть на чистой машине — начиная со второго пакета:
+        # для самого CSP остаются обычные суммы.
+        $cpverify = @($env:ProgramFiles, ${env:ProgramFiles(x86)}) |
+            Where-Object { $_ } |
+            ForEach-Object { Join-Path -Path $_ -ChildPath 'Crypto Pro\CSP\cpverify.exe' } |
+            Where-Object { Test-Path -LiteralPath $_ } |
+            Select-Object -First 1
+
+        if (-not $cpverify) {
+            Write-Warning '  ГОСТ не проверен: cpverify.exe появляется только вместе с КриптоПро CSP.'
+        }
+        else {
+            $expected = ($gost.Value -replace '[\s:-]', '').ToUpperInvariant()
+            $output = & $cpverify -mk $Path -alg GR3411_2012_256 2>&1 | Out-String
+            $match = [regex]::Match($output, '[0-9A-Fa-f]{64}')
+            if (-not $match.Success) {
+                Write-Warning "  cpverify не вернул хеш, ГОСТ не проверен. Вывод: $($output.Trim())"
+            }
+            elseif ($match.Value.ToUpperInvariant() -ne $expected) {
+                throw "контрольная сумма ГОСТ не совпала: ожидалась $expected, у файла $($match.Value.ToUpperInvariant())."
+            }
+            else {
+                $verified += 'ГОСТ Р 34.11-2012'
+            }
+        }
+    }
+
+    if ($requested -eq 0) { return }
+    if ($verified.Count -eq 0) {
+        throw 'ни одну из заданных контрольных сумм проверить не удалось — установка прервана.'
+    }
+    Write-Host "  контрольные суммы сходятся: $($verified -join ', ')"
+}
+
 function Install-FromFile {
     param(
         [string]$Path,
@@ -648,6 +708,7 @@ function Install-Application {
     if (($source -eq 'auto' -or $source -eq 'nas') -and $nasReady -and $Item.nasPath) {
         $file = Get-NasFile -Nas $Nas -RelativePath $Item.nasPath
         if ($file) {
+            Test-FileChecksum -Path $file -Checksums $Item.checksums
             Install-FromFile -Path $file -Arguments $Item.installerArgs -TimeoutSeconds $timeout
             return
         }
@@ -664,6 +725,7 @@ function Install-Application {
         $name = Split-Path -Leaf ([uri]$Item.installerUrl).LocalPath
         $dest = Join-Path -Path $script:WorkDir -ChildPath $name
         Invoke-WebRequest -Uri $Item.installerUrl -OutFile $dest -UseBasicParsing
+        Test-FileChecksum -Path $dest -Checksums $Item.checksums
         Install-FromFile -Path $dest -Arguments $Item.installerArgs -TimeoutSeconds $timeout
         return
     }

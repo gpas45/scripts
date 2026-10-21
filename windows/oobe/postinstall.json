@@ -45,40 +45,54 @@
   },
   "certificates": {
     "_comment": [
-      "Доверенные корневые и промежуточные сертификаты — прежде всего Минцифры",
-      "(Russian Trusted Root CA / Sub CA), без которых не открываются сайты",
-      "госуслуг, Сбербанка и части госорганов.",
-      "Файлы скачайте ОДИН раз с официальной страницы https://www.gosuslugi.ru/crt,",
-      "сверьте отпечаток и положите на NAS: тянуть корневой сертификат на каждой",
-      "машине с внешнего адреса не нужно и небезопасно.",
+      "Доверенные корневые и промежуточные сертификаты Минцифры (Russian Trusted",
+      "Root CA и два выпускающих), без которых не открываются сайты госуслуг,",
+      "Сбербанка и части госорганов. Промежуточных именно два: у выпущенного",
+      "в 2024 году другой ключ, и сертификаты, подписанные им, без него не",
+      "проверяются — поэтому ставим оба.",
+      "",
+      "Файлы лежат в репозитории (windows/oobe/certificates) и продублированы",
+      "на NAS. Порядок источников: сначала nasPath, при неудаче url.",
       "store: Root — доверенные корневые ЦС, CA — промежуточные.",
-      "thumbprint (SHA1, пробелы и двоеточия можно не убирать): если задан,",
-      "сертификат с другим отпечатком не установится. Для корневого ЦС заполнить",
-      "настоятельно рекомендуется — такой сертификат позволяет выпускать",
-      "сертификаты, которым машина будет доверять для любого сайта.",
-      "Узнать отпечаток: (Get-PfxCertificate .\\файл.cer).Thumbprint"
+      "thumbprint — отпечаток SHA1; при несовпадении сертификат не установится.",
+      "Отпечатки ниже сняты с файлов, полученных с gosuslugi.ru/crt, цепочка",
+      "проверена: оба выпускающих подписаны этим корнем.",
+      "Узнать отпечаток файла: (Get-PfxCertificate .\\файл.cer).Thumbprint"
     ],
     "enabled": true,
     "items": [
       {
         "name": "Russian Trusted Root CA (Минцифры)",
-        "nasPath": "Certificates/russian_trusted_root_ca.cer",
-        "url": "",
+        "nasPath": "Certificates/Russian_Trusted_Root_CA.cer",
+        "url": "https://raw.githubusercontent.com/gpas45/scripts/main/windows/oobe/certificates/Russian_Trusted_Root_CA.cer",
         "store": "Root",
-        "thumbprint": "",
+        "thumbprint": "8FF915CCAB7BC16F8C5C8099D53E0E115B3AEC2F",
         "profiles": [
           "base"
-        ]
+        ],
+        "_comment": "Корневой, самоподписанный. Действует до 27.02.2032."
       },
       {
-        "name": "Russian Trusted Sub CA (Минцифры)",
-        "nasPath": "Certificates/russian_trusted_sub_ca.cer",
-        "url": "",
+        "name": "Russian Trusted Sub CA (Минцифры, 2022)",
+        "nasPath": "Certificates/Russian_Trusted_Sub_CA.cer",
+        "url": "https://raw.githubusercontent.com/gpas45/scripts/main/windows/oobe/certificates/Russian_Trusted_Sub_CA.cer",
         "store": "CA",
-        "thumbprint": "",
+        "thumbprint": "335D43F53451B781535FF3882DF713D3C14F8A01",
         "profiles": [
           "base"
-        ]
+        ],
+        "_comment": "Выпускающий, серийный номер 1002. Действует до 06.03.2027."
+      },
+      {
+        "name": "Russian Trusted Sub CA 2024 (Минцифры)",
+        "nasPath": "Certificates/Russian_Trusted_Sub_CA_2024.cer",
+        "url": "https://raw.githubusercontent.com/gpas45/scripts/main/windows/oobe/certificates/Russian_Trusted_Sub_CA_2024.cer",
+        "store": "CA",
+        "thumbprint": "6741AB02CF6598C09652DC34D2DC095904E32B52",
+        "profiles": [
+          "base"
+        ],
+        "_comment": "Выпускающий, серийный номер 1005, другой ключ. Действует до 19.07.2029."
       }
     ]
   },
@@ -171,6 +185,11 @@
       "nasPath": "CryptoPro/CSP/csp-x64-rus.msi",
       "installerArgs": "/qn /norestart",
       "installerUrl": "",
+      "checksums": {
+        "md5": "326921d3551f371fcb2dccb7f183fcc4",
+        "sha256": "",
+        "gost2012_256": "C148910DDD1143E10F4BE68AD048F5738CB359DABE2C28735486F5546E6B41BC"
+      },
       "timeoutSeconds": 900,
       "profiles": [
         "base",
@@ -179,6 +198,10 @@
       "_comment": [
         "Дистрибутив берётся по вашей лицензии с cryptopro.ru и кладётся на NAS;",
         "в winget КриптоПро не публикуется.",
+        "Контрольные суммы обязательны. MD5 проверяется всегда, ГОСТ — только",
+        "если cpverify.exe уже есть, то есть при повторном прогоне: на чистой",
+        "машине он появляется вместе с самим CSP. Если знаете SHA256 своего",
+        "дистрибутива, впишите — он надёжнее MD5 и тоже проверяется всегда.",
         "Лицензия вводится отдельно, установщик её не спрашивает:",
         "\"C:\\Program Files\\Crypto Pro\\CSP\\cpconfig.exe\" -license -set <серийный номер>",
         "Набор компонентов при необходимости задаётся через ADDLOCAL в installerArgs."

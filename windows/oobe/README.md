@@ -54,7 +54,7 @@ powershell -ExecutionPolicy Bypass -File $env:TEMP\oobe.ps1
   Сертификаты      : Russian Trusted Root CA (Минцифры), Russian Trusted Sub CA (Минцифры)
   Правки реестра   : 34
   Office           : не ставим
-  Часовой пояс     : Russian Standard Time
+  Часовой пояс     : Ekaterinburg Standard Time
   Администратор    : Admin (пароль из файла ответов — смените после установки)
 ===============================================
   1 — продолжить          4 — пароль к раздаче

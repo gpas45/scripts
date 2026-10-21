@@ -668,6 +668,106 @@
       "profiles": [
         "base"
       ]
+    },
+    {
+      "description": "Магазин: не подставлять «облачно подобранное» содержимое (Windows 11)",
+      "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\CloudContent",
+      "name": "DisableCloudOptimizedContent",
+      "type": "DWord",
+      "value": 1,
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "description": "Магазин: не подставлять содержимое по состоянию учётной записи",
+      "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\CloudContent",
+      "name": "DisableConsumerAccountStateContent",
+      "type": "DWord",
+      "value": 1,
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "description": "Магазин: не доустанавливать предустановленные приложения",
+      "path": "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\ContentDeliveryManager",
+      "name": "PreInstalledAppsEnabled",
+      "type": "DWord",
+      "value": 0,
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "description": "Магазин: не доустанавливать приложения производителя",
+      "path": "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\ContentDeliveryManager",
+      "name": "OemPreInstalledAppsEnabled",
+      "type": "DWord",
+      "value": 0,
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "description": "Магазин: не восстанавливать ранее предустановленные приложения",
+      "path": "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\ContentDeliveryManager",
+      "name": "PreInstalledAppsEverEnabled",
+      "type": "DWord",
+      "value": 0,
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "description": "Магазин: запретить доставку рекламного содержимого",
+      "path": "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\ContentDeliveryManager",
+      "name": "ContentDeliveryAllowed",
+      "type": "DWord",
+      "value": 0,
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "description": "Магазин: отключить подбор приложений по «интересам»",
+      "path": "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\ContentDeliveryManager",
+      "name": "FeatureManagementEnabled",
+      "type": "DWord",
+      "value": 0,
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "description": "Магазин: не показывать экран «Добро пожаловать» с предложениями",
+      "path": "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\ContentDeliveryManager",
+      "name": "SubscribedContent-310093Enabled",
+      "type": "DWord",
+      "value": 0,
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "description": "Магазин: не подсовывать приложения на экран блокировки",
+      "path": "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\ContentDeliveryManager",
+      "name": "SubscribedContent-338387Enabled",
+      "type": "DWord",
+      "value": 0,
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "description": "Магазин: запретить автоматическую загрузку и обновление приложений (профиль storefreeze: заодно замораживает обновления уже установленных приложений магазина, включая App Installer с winget)",
+      "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\WindowsStore",
+      "name": "AutoDownload",
+      "type": "DWord",
+      "value": 2,
+      "profiles": [
+        "storefreeze"
+      ]
     }
   ],
   "system": {

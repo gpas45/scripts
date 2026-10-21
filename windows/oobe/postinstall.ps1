@@ -736,6 +736,43 @@ function Install-FromFile {
     if ($code -ne 0) { throw "установщик вернул код $code." }
 }
 
+function Copy-ApplicationConfig {
+    param(
+        $Item,
+        $Nas
+    )
+    if (-not $Item.PSObject.Properties['configFiles'] -or -not $Item.configFiles) { return }
+
+    foreach ($entry in $Item.configFiles) {
+        if (-not $entry.nasPath -or -not $entry.destination) { continue }
+
+        $source = Get-NasFile -Nas $Nas -RelativePath $entry.nasPath
+        if (-not $source) {
+            Write-Warning "  конфиг $($entry.nasPath) на источнике не найден — пропускаю."
+            continue
+        }
+
+        $destination = [Environment]::ExpandEnvironmentVariables($entry.destination)
+        $directory = Split-Path -Parent $destination
+        if ($directory -and -not (Test-Path -LiteralPath $directory)) {
+            New-Item -ItemType Directory -Force -Path $directory | Out-Null
+        }
+        Copy-Item -LiteralPath $source -Destination $destination -Force
+        Write-Host "  конфиг положен в $destination"
+    }
+
+    if ($Item.PSObject.Properties['restartService'] -and $Item.restartService) {
+        $service = Get-Service -Name $Item.restartService -ErrorAction SilentlyContinue
+        if (-not $service) {
+            Write-Warning "  служба $($Item.restartService) не найдена — настройки подхватятся после перезагрузки."
+        }
+        else {
+            Restart-Service -Name $Item.restartService -Force -ErrorAction Stop
+            Write-Host "  служба $($Item.restartService) перезапущена"
+        }
+    }
+}
+
 function Invoke-PostInstallStep {
     param(
         $Item,

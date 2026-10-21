@@ -975,6 +975,14 @@ if ($override) {
     }
 }
 
+if ($override -and $override.PSObject.Properties['office'] -and $config.PSObject.Properties['office']) {
+    foreach ($property in $override.office.PSObject.Properties) {
+        if ($property.Name -like '_*') { continue }
+        $config.office | Add-Member -NotePropertyName $property.Name -NotePropertyValue $property.Value -Force
+        Write-Host "  office.$($property.Name) = $($property.Value)"
+    }
+}
+
 $nas = $null
 if ($config.PSObject.Properties['nas']) { $nas = $config.nas }
 if ($nas) {

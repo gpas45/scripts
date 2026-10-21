@@ -277,6 +277,7 @@ function Show-InstallPlan {
 
     $plan = @{
         Nas       = @{}
+        Office    = $null
         Include   = $null
         Password  = (ConvertTo-Secret -Plain $NasPassword)
         Cancelled = $false
@@ -311,109 +312,117 @@ function Show-InstallPlan {
     }
 
     $software = @($config.software)
-    $default = @($software | Where-Object { -not $_.profiles -or ($_.profiles -contains 'base') } |
+    $chosen = @($software | Where-Object { -not $_.profiles -or ($_.profiles -contains 'base') } |
         ForEach-Object { $_.name })
-    $chosen = $default
     $probe = @($software | Where-Object { $_.nasPath } | Select-Object -First 1).nasPath
-    $access = $null
 
+    # --- Опрос: вид подключения, адрес, учётные данные, проверка -------------
     while ($true) {
-        if (-not $access) {
-            Write-Host '  Проверяю доступ к раздаче…'
-            $credential = $null
-            if ($user -and $plan.Password) {
-                $credential = New-Object System.Management.Automation.PSCredential -ArgumentList $user, $plan.Password
-            }
-            $access = Test-SourceAccess -Type $type -BaseUrl $baseUrl -Share $share `
-                -Credential $credential -ProbePath $probe
-        }
-        $source = if ($type -eq 'smb') { $share } else { $baseUrl }
-        $extra = @($software | Where-Object { $chosen -notcontains $_.name } | ForEach-Object { $_.name })
-        $certs = @()
-        if ($config.PSObject.Properties['certificates'] -and $config.certificates.enabled) {
-            $certs = @($config.certificates.items | ForEach-Object { $_.name })
-        }
-
         Write-Host ''
-        Write-Host '================ План установки ================' -ForegroundColor Cyan
-        Write-Host ("  Источник ПО      : {0} ({1})" -f $source, $type.ToUpperInvariant())
-        Write-Host ("  Учётная запись   : {0}" -f $(if ($user) { $user } else { '— (без аутентификации)' }))
-        Write-Host ("  Пароль           : {0}" -f $(if ($plan.Password) { 'задан' } else { 'не задан' }))
-        if ($access.Ok -and -not $access.Caveat) {
-            Write-Host ("  Доступ к раздаче : ОК — {0}" -f $access.Message) -ForegroundColor DarkGreen
-        }
-        elseif ($access.Ok) {
-            Write-Host ("  Доступ к раздаче : с оговоркой — {0}" -f $access.Message) -ForegroundColor DarkYellow
+        Write-Host 'Откуда брать дистрибутивы:' -ForegroundColor Cyan
+        Write-Host '  1 — HTTPS, из интернета через обратный прокси'
+        Write-Host '  2 — SMB, внутри локальной сети напрямую с NAS'
+        $suggested = if ($type -eq 'smb') { '2' } else { '1' }
+        $answer = (Read-Host "  Подключение [$suggested]").Trim()
+        if (-not $answer) { $answer = $suggested }
+        $type = if ($answer -eq '2') { 'smb' } else { 'http' }
+
+        if ($type -eq 'smb') {
+            $value = (Read-Host "  UNC-путь [$share]").Trim()
+            if ($value) { $share = $value }
         }
         else {
-            Write-Host ("  Доступ к раздаче : НЕТ — {0}" -f $access.Message) -ForegroundColor Red
+            $value = (Read-Host "  Адрес раздачи [$baseUrl]").Trim()
+            if ($value) { $baseUrl = $value }
         }
-        Write-Host ("  Программы        : {0}" -f $chosen.Count)
-        foreach ($name in $chosen) { Write-Host "      - $name" }
-        if ($extra.Count -gt 0) {
-            Write-Host ("  Дополнительно    : {0}" -f ($extra -join ', '))
-        }
-        if ($certs.Count -gt 0) {
-            Write-Host ("  Сертификаты      : {0}" -f ($certs -join ', '))
-        }
-        Write-Host ("  Правки реестра   : {0}" -f @($config.registry).Count)
-        Write-Host ("  Office           : {0}" -f $(if ($config.office.enabled) { $config.office.mode } else { 'не ставим' }))
-        Write-Host ("  Часовой пояс     : {0}" -f $config.system.timeZone)
-        Write-Host ("  Администратор    : Admin (пароль из файла ответов — смените после установки)")
-        Write-Host '==============================================='
-        Write-Host '  1 — продолжить          4 — пароль к раздаче'
-        Write-Host '  2 — адрес раздачи       5 — переключить HTTPS/SMB'
-        Write-Host '  3 — набор программ      6 — отмена'
-        Write-Host '  7 — проверить доступ ещё раз'
 
-        $answer = (Read-Host '  Выбор [1]').Trim()
-        if ([string]::IsNullOrEmpty($answer)) { $answer = '1' }
+        $value = (Read-Host "  Учётная запись [$user]").Trim()
+        if ($value) { $user = $value }
+        $secret = Read-Secret -Prompt '  Пароль'
+        if ($secret) { $plan.Password = $secret }
 
-        switch ($answer) {
-            '1' {
-                if (-not $access.Ok) {
-                    Write-Host ''
-                    Write-Warning 'Раздача недоступна. После перезагрузки ПО взять будет неоткуда:'
-                    Write-Warning 'встанут только winget-пакеты, правки реестра и системные настройки.'
-                    $confirm = (Read-Host '  Всё равно продолжить? [y/N]').Trim().ToLowerInvariant()
-                    if ($confirm -ne 'y') { continue }
-                }
-                if ($type -ne $config.nas.type) { $plan.Nas['type'] = $type }
-                if ($baseUrl -ne $config.nas.baseUrl) { $plan.Nas['baseUrl'] = $baseUrl }
-                if ($share -ne $config.nas.share) { $plan.Nas['share'] = $share }
-                if ($user -ne $config.nas.user) { $plan.Nas['user'] = $user }
-                if (@(Compare-Object -ReferenceObject $default -DifferenceObject $chosen -SyncWindow 0).Count -gt 0) {
-                    $plan.Include = $chosen
-                }
-                return $plan
-            }
-            '2' {
-                $value = (Read-Host "    Адрес раздачи [$baseUrl]").Trim()
-                if ($value) { $baseUrl = $value; $access = $null }
-            }
-            '3' { $chosen = @(Select-PlanSoftware -Software $software -Chosen $chosen) }
-            '4' {
-                $value = (Read-Host "    Учётная запись [$user]").Trim()
-                if ($value) { $user = $value; $access = $null }
-                $secret = Read-Secret -Prompt '    Пароль (Enter — оставить)'
-                if ($secret) { $plan.Password = $secret; $access = $null }
-            }
-            '5' {
-                $type = if ($type -eq 'smb') { 'http' } else { 'smb' }
-                $access = $null
-                if ($type -eq 'smb') {
-                    $value = (Read-Host "    UNC-путь [$share]").Trim()
-                    if ($value) { $share = $value }
-                }
-            }
-            '6' {
-                $plan.Cancelled = $true
-                return $plan
-            }
-            '7' { $access = $null }
-            default { Write-Warning "  не понял «$answer»." }
+        Write-Host '  Проверяю доступ…'
+        $credential = $null
+        if ($user -and $plan.Password) {
+            $credential = New-Object System.Management.Automation.PSCredential -ArgumentList $user, $plan.Password
         }
+        $access = Test-SourceAccess -Type $type -BaseUrl $baseUrl -Share $share `
+            -Credential $credential -ProbePath $probe
+
+        if ($access.Ok -and -not $access.Caveat) {
+            Write-Host "  Доступ есть: $($access.Message)" -ForegroundColor DarkGreen
+            break
+        }
+        if ($access.Ok) {
+            Write-Host "  Доступ есть, но с оговоркой: $($access.Message)" -ForegroundColor DarkYellow
+        }
+        else {
+            Write-Host "  Доступа нет: $($access.Message)" -ForegroundColor Red
+            Write-Host '  Без него после перезагрузки дистрибутивы брать будет неоткуда:'
+            Write-Host '  встанут только winget-пакеты, правки реестра и системные настройки.'
+        }
+        $again = (Read-Host '  Ввести заново? [Y/n]').Trim().ToLowerInvariant()
+        if ($again -eq 'n') { break }
     }
+
+    # --- Microsoft Office ------------------------------------------------------
+    $officeEnabled = [bool]$config.office.enabled
+    $officeMode = $config.office.mode
+    $suggested = if ($officeEnabled) { 'Y/n' } else { 'y/N' }
+    Write-Host ''
+    $answer = (Read-Host "  Ставить Microsoft Office, режим ${officeMode}? [$suggested]").Trim().ToLowerInvariant()
+    if ($answer -eq 'y') { $officeEnabled = $true }
+    elseif ($answer -eq 'n') { $officeEnabled = $false }
+
+    # --- План -----------------------------------------------------------------
+    $source = if ($type -eq 'smb') { $share } else { $baseUrl }
+    $extra = @($software | Where-Object { $chosen -notcontains $_.name } | ForEach-Object { $_.name })
+    $certs = @()
+    if ($config.PSObject.Properties['certificates'] -and $config.certificates.enabled) {
+        $certs = @($config.certificates.items | ForEach-Object { $_.name })
+    }
+
+    Write-Host ''
+    Write-Host '================ План установки ================' -ForegroundColor Cyan
+    Write-Host ("  Источник ПО      : {0} ({1})" -f $source, $type.ToUpperInvariant())
+    Write-Host ("  Учётная запись   : {0}" -f $(if ($user) { $user } else { '— (без аутентификации)' }))
+    Write-Host ("  Программы        : {0}" -f $chosen.Count)
+    foreach ($name in $chosen) { Write-Host "      - $name" }
+    if ($extra.Count -gt 0) {
+        Write-Host ("  Дополнительно    : {0}" -f ($extra -join ', '))
+    }
+    if ($certs.Count -gt 0) {
+        Write-Host ("  Сертификаты      : {0}" -f ($certs -join ', '))
+    }
+    Write-Host ("  Правки реестра   : {0}" -f @($config.registry).Count)
+    Write-Host ("  Office           : {0}" -f $(if ($officeEnabled) { "будет установлен ($officeMode)" } else { 'не ставим' }))
+    Write-Host ("  Часовой пояс     : {0}" -f $config.system.timeZone)
+    Write-Host '  Администратор    : Admin (пароль из файла ответов — смените после установки)'
+    Write-Host '==============================================='
+
+    $answer = (Read-Host '  Enter — начать, n — изменить набор программ, q — отмена').Trim().ToLowerInvariant()
+    if ($answer -eq 'q') {
+        $plan.Cancelled = $true
+        return $plan
+    }
+    if ($answer -eq 'n') {
+        $chosen = @(Select-PlanSoftware -Software $software -Chosen $chosen)
+    }
+
+    if ($officeEnabled -ne [bool]$config.office.enabled) {
+        $plan.Office = @{ enabled = $officeEnabled }
+    }
+    if ($type -ne $config.nas.type) { $plan.Nas['type'] = $type }
+    if ($baseUrl -ne $config.nas.baseUrl) { $plan.Nas['baseUrl'] = $baseUrl }
+    if ($share -ne $config.nas.share) { $plan.Nas['share'] = $share }
+    if ($user -ne $config.nas.user) { $plan.Nas['user'] = $user }
+
+    $default = @($software | Where-Object { -not $_.profiles -or ($_.profiles -contains 'base') } |
+        ForEach-Object { $_.name })
+    if (@(Compare-Object -ReferenceObject $default -DifferenceObject $chosen -SyncWindow 0).Count -gt 0) {
+        $plan.Include = $chosen
+    }
+    return $plan
 }
 
 # --- 1. Проверка: находимся ли мы на этапе OOBE ------------------------------
@@ -561,6 +570,7 @@ if (-not $SkipPostInstall) {
 
         $override = @{}
         if ($plan.Nas.Count -gt 0) { $override['nas'] = $plan.Nas }
+        if ($plan.Office) { $override['office'] = $plan.Office }
         if ($plan.Include) { $override['include'] = $plan.Include }
 
         if ($override.Count -gt 0) {

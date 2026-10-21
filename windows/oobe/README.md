@@ -32,17 +32,28 @@ irm https://raw.githubusercontent.com/gpas45/scripts/main/windows/oobe/oobe.ps1 
 powershell -ExecutionPolicy Bypass -File $env:TEMP\oobe.ps1
 ```
 
-Скрипт покажет план установки и даст его поправить — человек присутствует
-только на этом шаге, дальше всё идёт само:
+Скрипт по очереди спросит всё, что нужно, — человек присутствует только на
+этом шаге, дальше всё идёт само:
 
 ```
+Откуда брать дистрибутивы:
+  1 — HTTPS, из интернета через обратный прокси
+  2 — SMB, внутри локальной сети напрямую с NAS
+  Подключение [1]:
+  Адрес раздачи [https://oobe.dioservice.ru/deploy]:
+  Учётная запись [deploy]:
+  Пароль: ********
+  Проверяю доступ…
+  Доступ есть: HTTP 200, https://oobe.dioservice.ru/deploy/7-Zip/7z-x64.msi
+
+  Ставить Microsoft Office, режим odt? [y/N]:
+
 ================ План установки ================
   Источник ПО      : https://oobe.dioservice.ru/deploy (HTTP)
   Учётная запись   : deploy
-  Пароль           : задан
-  Доступ к раздаче : ОК — HTTP 200, https://oobe.dioservice.ru/deploy/7-Zip/7z-x64.msi
-  Программы        : 9
+  Программы        : 10
       - 7-Zip
+      - WinRAR
       - Notepad++
       - Adobe Acrobat Reader (64-bit)
       - Google Chrome
@@ -52,16 +63,28 @@ powershell -ExecutionPolicy Bypass -File $env:TEMP\oobe.ps1
       - Сертификаты УЦ СКБ Контур
       - Aspia Host
   Дополнительно    : VLC, Far Manager
-  Сертификаты      : Russian Trusted Root CA (Минцифры), Russian Trusted Sub CA (Минцифры)
-  Правки реестра   : 34
+  Сертификаты      : Russian Trusted Root CA, Russian Trusted Sub CA, Russian Trusted Sub CA 2024
+  Правки реестра   : 43
   Office           : не ставим
   Часовой пояс     : Ekaterinburg Standard Time
   Администратор    : Admin (пароль из файла ответов — смените после установки)
 ===============================================
-  1 — продолжить          4 — пароль к раздаче
-  2 — адрес раздачи       5 — переключить HTTPS/SMB
-  3 — набор программ      6 — отмена
-  7 — проверить доступ ещё раз
+  Enter — начать, n — изменить набор программ, q — отмена:
+```
+
+Если доступа к раздаче нет, скрипт покажет причину и предложит ввести всё
+заново — адрес и пароль правятся на месте, не доходя до перезагрузки.
+
+Пароль вводится скрыто и сохраняется в `C:\ProgramData\oobe\nas.cred` с правами
+только для SYSTEM и администраторов. Ответы складываются в
+`C:\ProgramData\oobe\postinstall.override.json`, который `postinstall.ps1`
+подхватит при первом входе; сам `postinstall.json` править не нужно.
+
+Чтобы ничего не спрашивалось, задайте всё ключами:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File $env:TEMP\oobe.ps1 -NoPrompt `
+    -NasBaseUrl https://oobe.dioservice.ru/deploy -NasUser deploy -NasPassword 'пароль'
 ```
 
 ### Проверка доступа к раздаче

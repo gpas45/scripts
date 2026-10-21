@@ -43,10 +43,21 @@
     Путь к postinstall.json. По умолчанию ищется рядом со скриптом и в
     %ProgramData%\oobe, иначе скачивается с ConfigUri.
 
+.PARAMETER NasType
+    http или smb — перекрывает nas.type из конфига.
+
+.PARAMETER NasBaseUrl
+    Адрес HTTPS-раздачи дистрибутивов, перекрывает nas.baseUrl. Так адрес
+    меняется без правки конфига.
+
+.PARAMETER NasShare
+    UNC-путь к SMB-папке, перекрывает nas.share.
+
 .PARAMETER NasUser
 .PARAMETER NasPassword
-    Учётные данные для SMB-папки NAS. Перекрывают значения из конфига.
-    Пароль в репозиторий не кладём — см. nas.passwordFile в postinstall.json.
+    Учётные данные NAS: для SMB — подключение к папке, для HTTPS — базовая
+    аутентификация. Перекрывают значения из конфига. Пароль в репозиторий не
+    кладём — см. nas.passwordFile в postinstall.json.
 
 .NOTES
     Документация по файлам ответов:
@@ -60,6 +71,9 @@ param(
     [switch]$Select,
     [string]$ConfigPath,
     [string]$ConfigUri = 'https://raw.githubusercontent.com/gpas45/scripts/main/windows/oobe/postinstall.json',
+    [ValidateSet('http', 'smb')]
+    [string]$NasType,
+    [string]$NasBaseUrl,
     [string]$NasShare,
     [string]$NasUser,
     [string]$NasPassword,
@@ -76,6 +90,7 @@ $ErrorActionPreference = 'Stop'
 $script:Failures = New-Object 'System.Collections.Generic.List[string]'
 $script:WorkDir = Join-Path -Path $env:TEMP -ChildPath 'oobe-postinstall'
 $script:Winget = $null
+$script:NasHttpHeaders = $null
 $script:RebootRequired = $false
 
 New-Item -ItemType Directory -Force -Path $script:WorkDir | Out-Null
@@ -216,6 +231,28 @@ function Get-Configuration {
     return ($raw | ConvertFrom-Json)
 }
 
+function Merge-NasOverride {
+    param($Nas)
+
+    # nas.override.json пишет oobe.ps1, когда адрес раздачи задали ключом или
+    # ввели в OOBE. Так адрес меняется без правки postinstall.json.
+    $candidates = @()
+    if ($PSScriptRoot) { $candidates += (Join-Path -Path $PSScriptRoot -ChildPath 'nas.override.json') }
+    $candidates += (Join-Path -Path $env:ProgramData -ChildPath 'oobe\nas.override.json')
+
+    foreach ($candidate in $candidates) {
+        if (-not (Test-Path -LiteralPath $candidate)) { continue }
+        Write-Host "Переопределение NAS: $candidate"
+        $override = Get-Content -LiteralPath $candidate -Raw -Encoding UTF8 | ConvertFrom-Json
+        foreach ($property in $override.PSObject.Properties) {
+            if ($property.Name -like '_*') { continue }
+            $Nas | Add-Member -NotePropertyName $property.Name -NotePropertyValue $property.Value -Force
+            Write-Host "  $($property.Name) = $($property.Value)"
+        }
+        break
+    }
+}
+
 function Wait-Network {
     param([int]$TimeoutSeconds = 120)
     if ($TimeoutSeconds -le 0) { return }
@@ -265,6 +302,21 @@ function Connect-NasShare {
             [Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
             Write-Warning 'Проверка TLS-сертификата NAS отключена (nas.ignoreCertErrors).'
         }
+
+        # Раздача в интернете обычно закрыта базовой аутентификацией. Windows
+        # PowerShell по -Credential ждёт ответа 401, поэтому отправляем заголовок
+        # сразу — так работает и там, где сервер challenge не присылает.
+        $user = if ($NasUser) { $NasUser } else { $Nas.user }
+        $password = Get-NasPassword -Nas $Nas
+        if ($user -and $password) {
+            $pair = '{0}:{1}' -f $user, $password
+            $token = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($pair))
+            $script:NasHttpHeaders = @{ Authorization = "Basic $token" }
+            Write-Host "HTTPS: $($Nas.baseUrl), базовая аутентификация как $user."
+        }
+        else {
+            Write-Host "HTTPS: $($Nas.baseUrl), без аутентификации."
+        }
         return
     }
 
@@ -306,8 +358,10 @@ function Get-NasFile {
 
     if ($Nas.type -eq 'http') {
         $url = '{0}/{1}' -f $Nas.baseUrl.TrimEnd('/'), ($RelativePath -replace '\\', '/')
+        $request = @{ Uri = $url; OutFile = $dest; UseBasicParsing = $true }
+        if ($script:NasHttpHeaders) { $request['Headers'] = $script:NasHttpHeaders }
         try {
-            Invoke-WebRequest -Uri $url -OutFile $dest -UseBasicParsing
+            Invoke-WebRequest @request
             return $dest
         }
         catch {
@@ -662,7 +716,13 @@ Write-Host "Профили: $($Profiles -join ', ')"
 
 $nas = $null
 if ($config.PSObject.Properties['nas']) { $nas = $config.nas }
-if ($nas -and $NasShare) { $nas.share = $NasShare }
+if ($nas) {
+    # Приоритет: postinstall.json -> nas.override.json -> ключи командной строки.
+    Merge-NasOverride -Nas $nas
+    if ($NasType) { $nas.type = $NasType }
+    if ($NasBaseUrl) { $nas.baseUrl = $NasBaseUrl }
+    if ($NasShare) { $nas.share = $NasShare }
+}
 $script:NasSharePath = if ($nas) { $nas.share } else { $null }
 
 if ($nas -and $nas.enabled) {

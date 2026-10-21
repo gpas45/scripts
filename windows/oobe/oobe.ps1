@@ -42,11 +42,28 @@
     в <системный диск>\ProgramData\oobe, чтобы при первом входе файл ответов
     запустил их локально, без обращения в интернет.
 
+.PARAMETER NasType
+    http или smb. По умолчанию берётся из postinstall.json (там http, так как
+    установка идёт за пределами локальной сети).
+
+.PARAMETER NasBaseUrl
+    Адрес HTTPS-раздачи дистрибутивов. Если не задан и скрипт запущен в
+    интерактивной консоли, адрес спрашивается с подстановкой значения из
+    конфига — так его можно сменить прямо в OOBE.
+
+.PARAMETER NasShare
+    UNC-путь к SMB-папке, если выбран -NasType smb.
+
+.PARAMETER NasUser
 .PARAMETER NasPassword
-    Пароль учётной записи NAS. Сохраняется в <системный диск>\ProgramData\oobe\nas.cred
-    с правами только для SYSTEM и администраторов, чтобы postinstall.ps1 смог
-    подключиться к SMB-папке при первом входе. Если NAS раздаёт дистрибутивы
-    по HTTP (nas.type = http), пароль не нужен.
+    Учётные данные NAS: для SMB — подключение к папке, для HTTPS — базовая
+    аутентификация. Пароль сохраняется в
+    <системный диск>\ProgramData\oobe\nas.cred с правами только для SYSTEM и
+    администраторов, чтобы postinstall.ps1 смог им воспользоваться при первом
+    входе.
+
+.PARAMETER NoPrompt
+    Ничего не спрашивать: взять адрес раздачи из конфига и ключей как есть.
 
 .PARAMETER SkipPostInstall
     Не скачивать postinstall.*: файл ответов тогда возьмёт скрипт из интернета.
@@ -66,7 +83,13 @@ param(
     [string]$Sha256,
     [string]$Path = (Join-Path -Path $env:TEMP -ChildPath 'UnattendOOBE.xml'),
     [string]$PostInstallBaseUri = 'https://raw.githubusercontent.com/gpas45/scripts/main/windows/oobe',
+    [ValidateSet('http', 'smb')]
+    [string]$NasType,
+    [string]$NasBaseUrl,
+    [string]$NasShare,
+    [string]$NasUser,
     [string]$NasPassword,
+    [switch]$NoPrompt,
     [switch]$SkipPostInstall,
     [switch]$Force
 )
@@ -184,6 +207,44 @@ if (-not $SkipPostInstall) {
             Invoke-WebRequest -Uri ('{0}/{1}' -f $PostInstallBaseUri.TrimEnd('/'), $name) `
                 -OutFile $target -UseBasicParsing
             Write-Host "  положил $target"
+        }
+
+        # Адрес раздачи дистрибутивов. Запись в nas.override.json рядом с
+        # конфигом: postinstall.ps1 подхватит её при первом входе, а сам
+        # postinstall.json править не нужно.
+        $staged = Join-Path -Path $oobeDir -ChildPath 'postinstall.json'
+        $nasType = $NasType
+        $nasBaseUrl = $NasBaseUrl
+        $nasShare = $NasShare
+
+        if (-not $NoPrompt -and -not $nasBaseUrl -and [Environment]::UserInteractive) {
+            $current = $null
+            if (Test-Path -LiteralPath $staged) {
+                try {
+                    $current = (Get-Content -LiteralPath $staged -Raw -Encoding UTF8 | ConvertFrom-Json).nas.baseUrl
+                }
+                catch {
+                    Write-Warning "Не удалось прочитать адрес из конфига: $($_.Exception.Message)"
+                }
+            }
+            Write-Host ''
+            Write-Host 'Откуда брать дистрибутивы ПО (Enter — оставить как есть):'
+            $answer = (Read-Host "  Адрес раздачи [$current]").Trim()
+            if ($answer) { $nasBaseUrl = $answer }
+        }
+
+        $override = @{}
+        if ($nasType) { $override['type'] = $nasType }
+        if ($nasBaseUrl) { $override['baseUrl'] = $nasBaseUrl }
+        if ($nasShare) { $override['share'] = $nasShare }
+        if ($NasUser) { $override['user'] = $NasUser }
+
+        if ($override.Count -gt 0) {
+            $overrideFile = Join-Path -Path $oobeDir -ChildPath 'nas.override.json'
+            $override | ConvertTo-Json -Depth 3 |
+                Set-Content -LiteralPath $overrideFile -Encoding UTF8
+            Write-Host "  положил $overrideFile"
+            foreach ($key in $override.Keys) { Write-Host "    $key = $($override[$key])" }
         }
 
         if ($NasPassword) {

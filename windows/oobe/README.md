@@ -32,8 +32,18 @@ irm https://raw.githubusercontent.com/gpas45/scripts/main/windows/oobe/oobe.ps1 
 powershell -ExecutionPolicy Bypass -File $env:TEMP\oobe.ps1
 ```
 
-С паролем к SMB-папке NAS (сохраняется в `C:\ProgramData\oobe\nas.cred`
-с правами только для SYSTEM и администраторов) — добавьте `-NasPassword 'пароль'`.
+Скрипт спросит адрес раздачи дистрибутивов, подставив значение из конфига
+(`https://nas.dioservice.ru/install`) — Enter оставит как есть, иначе введите
+другой. Можно задать сразу и не отвечать на вопросы:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File $env:TEMP\oobe.ps1 `
+    -NasBaseUrl https://nas.dioservice.ru/install -NasUser deploy -NasPassword 'пароль'
+```
+
+Если раздача закрыта базовой аутентификацией, `-NasUser`/`-NasPassword` обязательны.
+Пароль сохраняется в `C:\ProgramData\oobe\nas.cred` с правами только для SYSTEM
+и администраторов. Для полностью автоматического прогона добавьте `-NoPrompt`.
 
 Короткий вариант «в одну команду» из статьи-источника тоже работает, но
 скрипты здесь сохранены в UTF-8 **с BOM** (иначе Windows PowerShell 5.1
@@ -69,12 +79,11 @@ powershell -c "iex ((irm https://raw.githubusercontent.com/gpas45/scripts/main/w
 Ожидаемая раскладка раздачи (пути задаются в `software[].nasPath`):
 
 ```
-\\nas.local\install\
+https://nas.dioservice.ru/install/
 ├─ 7-Zip\7z-x64.msi
 ├─ AdobeReader\AcroRdrDCx64.exe
 ├─ NotepadPlusPlus\npp-x64.exe
 ├─ Chrome\GoogleChromeStandaloneEnterprise64.msi
-├─ Firefox\FirefoxSetup-x64.msi
 ├─ VLC\vlc-win64.exe
 ├─ YandexBrowser\Yandex.msi
 ├─ Far\Far-x64.msi
@@ -94,28 +103,58 @@ powershell -c "iex ((irm https://raw.githubusercontent.com/gpas45/scripts/main/w
 Имена файлов без номеров версий — при обновлении дистрибутива переименуйте его,
 и конфиг править не придётся.
 
-### Вариант А: SMB (`"type": "smb"`)
+### Вариант по умолчанию: HTTPS (`"type": "http"`)
+
+Установка идёт за пределами локальной сети, поэтому по умолчанию дистрибутивы
+забираются по HTTPS с `https://nas.dioservice.ru/install`.
+
+На Synology: раздайте папку `install` через **Web Station** (или File Station) и
+выпустите сертификат Let's Encrypt средствами DSM. Если сертификат
+самоподписанный, можно поставить `"ignoreCertErrors": true`, но с публичным
+адресом это лишнее.
+
+Раздача закрывается базовой аутентификацией: заполните `nas.user` и передайте
+пароль через `-NasPassword` либо файл `nas.cred`. Скрипт отправляет заголовок
+`Authorization` сразу, не дожидаясь ответа 401.
+
+> ⚠️ Раздача доступна из интернета, а дистрибутивы КриптоПро, Контура и Яндекс
+> Браузера распространяются по лицензии. Закройте её базовой аутентификацией
+> или ограничением по адресам — открытая раздача это и утечка лицензионного ПО,
+> и готовый канал подмены установщиков.
+
+### Альтернатива: SMB (`"type": "smb"`)
+
+Для развёртывания внутри сети или через VPN. Поменяйте `nas.type` на `smb` —
+путь берётся из `nas.share`.
 
 На NAS: **Панель управления → Общая папка** → папка `install`, и
 **Пользователь и группа** → учётная запись `deploy` с правом **только на чтение**.
-
-Пароль в репозиторий не кладём. Два способа передать его:
-
-- `oobe.ps1 -NasPassword '…'` — пишет `C:\ProgramData\oobe\nas.cred` с правами
-  только для SYSTEM и администраторов (так работает сценарий 1);
-- `postinstall.ps1 -NasPassword '…'` при ручном запуске.
+Пароль передаётся так же, как для HTTPS.
 
 > Гостевой доступ не подойдёт: Windows 10/11 по умолчанию запрещает
 > небезопасный гостевой вход в SMB. Включать `AllowInsecureGuestAuth` не стоит —
-> это открывает машину для атак на подмену SMB-сервера.
+> это открывает машину для атак на подмену SMB-сервера. Наружу SMB не публикуют.
 
-### Вариант Б: HTTP (`"type": "http"`)
+### Смена адреса раздачи
 
-Раздайте `install` через **Web Station** или File Station и укажите
-`nas.baseUrl`. Аутентификация не нужна — ограничьте доступ по подсети
-в брандмауэре DSM. Если на DSM самоподписанный сертификат, поставьте
-`"ignoreCertErrors": true` (или, лучше, выпустите сертификат Let's Encrypt
-средствами DSM).
+Править `postinstall.json` для этого не нужно. Приоритет такой:
+
+```
+postinstall.json  ->  nas.override.json  ->  ключи командной строки
+```
+
+| Как | Когда |
+|---|---|
+| `oobe.ps1` спросит адрес и запишет `nas.override.json` | Обычный прогон в OOBE: вводите адрес один раз, первый вход подхватит его сам |
+| `oobe.ps1 -NasBaseUrl … -NasType … -NasShare … -NasUser …` | Без вопросов; вместе с `-NoPrompt` — для автоматизации |
+| `postinstall.ps1 -NasBaseUrl …` | Ручной повторный запуск на уже настроенной машине |
+
+`nas.override.json` лежит в `C:\ProgramData\oobe\` рядом с конфигом и содержит
+только изменённые поля:
+
+```json
+{ "baseUrl": "https://backup.dioservice.ru/install", "user": "deploy" }
+```
 
 ## Настройка `postinstall.json`
 
@@ -132,7 +171,7 @@ powershell -ExecutionPolicy Bypass -File .\postinstall.ps1 -Profiles base,browse
 | Профиль | Что входит |
 |---|---|
 | `base` | 7-Zip, Adobe Reader, Notepad++, сертификаты Минцифры, все правки реестра, системные настройки |
-| `browser` | Chrome, Firefox, Яндекс Браузер для организаций |
+| `browser` | Chrome, Яндекс Браузер для организаций |
 | `extra` | VLC, Far Manager — опционально, в базовый набор не входят |
 | `crypto` | КриптоПро CSP, КриптоПро ЭЦП Browser plug-in, сертификаты УЦ СКБ Контур |
 | `remote` | Aspia Host |
@@ -149,7 +188,7 @@ powershell -ExecutionPolicy Bypass -File .\postinstall.ps1 -Profiles base,browse
 .\postinstall.ps1 -Include 'Крипто*','Контур','Aspia'
 
 # набор профилей минус лишнее
-.\postinstall.ps1 -Profiles base,browser -Exclude Chrome,Firefox
+.\postinstall.ps1 -Profiles base,browser -Exclude Chrome
 ```
 
 `-Include` и `-Exclude` сравниваются с полем `name` без учёта регистра, по

@@ -1,6 +1,6 @@
 # scripts
 
-Коллекция скриптов для администрирования инфраструктуры: 1С, PostgreSQL для 1С, Windows (RD Gateway, развёртывание), MikroTik RouterOS, Proxmox, мониторинг Zabbix.
+Коллекция скриптов для администрирования инфраструктуры: 1С, PostgreSQL для 1С, Windows (RD Gateway, развёртывание), MikroTik RouterOS, Proxmox, Synology, мониторинг Zabbix.
 
 Сюда консолидировано содержимое репозиториев `RouterOS`, `proxmox` и `win` — теперь всё в одном месте.
 
@@ -16,6 +16,7 @@
 | [`routeros/`](routeros/) | Скрипты и конфиги MikroTik RouterOS + `docs/` (Obsidian-документация). |
 | [`proxmox/`](proxmox/) | Скрипты для Proxmox VE. |
 | [`linux/`](linux/) | Linux: тесты железа, конфиги окружения, 1С, motd. |
+| [`synology/`](synology/) | Synology DSM: проверка на уязвимость PHP2Shell. |
 | [`zabbix/`](zabbix/) | Шаблоны мониторинга Zabbix. |
 | [`obsidian/`](obsidian/) | Шаблоны Obsidian (Templater), напр. торговый дневник. |
 

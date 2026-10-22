@@ -3,7 +3,18 @@
     "Конфигурация postinstall.ps1 — ПО, правки реестра и системные настройки.",
     "Правьте этот файл, а не скрипт. Каждый элемент может иметь поле profiles:",
     "применяется, только если профиль передан в -Profiles (по умолчанию base).",
-    "Элемент без profiles применяется всегда."
+    "Элемент без profiles применяется всегда.",
+    "",
+    "detect — как понять, что пакет уже установлен, и не ставить его заново:",
+    "  displayName — шаблоны имени в списке установленных программ (три ветки",
+    "                деинсталляции: 32- и 64-битная машинные плюс",
+    "                пользовательская). Допустимы * и ?",
+    "  minVersion  — если задана, установленная версия с ней сравнивается:",
+    "                ниже — ставим поверх, не ниже — пропускаем. Пусто —",
+    "                пропускаем при любой найденной версии",
+    "  path        — запасной признак, если записи о деинсталляции нет",
+    "Пустой detect означает «ставить всегда». Ключ -Reinstall у скрипта",
+    "отключает проверку целиком."
   ],
   "nas": {
     "_comment": [
@@ -106,6 +117,12 @@
       "nasPath": "7-Zip/7z-x64.msi",
       "installerArgs": "/qn /norestart",
       "installerUrl": "",
+      "detect": {
+        "displayName": [
+          "7-Zip*"
+        ],
+        "minVersion": ""
+      },
       "profiles": [
         "base"
       ]
@@ -117,6 +134,12 @@
       "nasPath": "WinRAR/winrar-x64.exe",
       "installerArgs": "/S",
       "installerUrl": "",
+      "detect": {
+        "displayName": [
+          "WinRAR*"
+        ],
+        "minVersion": ""
+      },
       "profiles": [
         "base"
       ],
@@ -133,6 +156,12 @@
       "nasPath": "NotepadPlusPlus/npp-x64.msi",
       "installerArgs": "/qn /norestart",
       "installerUrl": "",
+      "detect": {
+        "displayName": [
+          "Notepad++*"
+        ],
+        "minVersion": ""
+      },
       "profiles": [
         "base"
       ]
@@ -145,6 +174,14 @@
       "installerArgs": "/sAll /rs /msi EULA_ACCEPT=YES",
       "successCodes": [],
       "installerUrl": "",
+      "detect": {
+        "displayName": [
+          "Adobe Acrobat Reader*",
+          "Adobe Acrobat (64-bit)*",
+          "Adobe Acrobat DC*"
+        ],
+        "minVersion": ""
+      },
       "profiles": [
         "base"
       ]
@@ -156,6 +193,12 @@
       "nasPath": "Chrome/GoogleChromeStandaloneEnterprise64.msi",
       "installerArgs": "/qn /norestart",
       "installerUrl": "",
+      "detect": {
+        "displayName": [
+          "Google Chrome*"
+        ],
+        "minVersion": ""
+      },
       "profiles": [
         "base",
         "browser"
@@ -169,6 +212,13 @@
       "installerArgs": "/qn /norestart",
       "successCodes": [],
       "installerUrl": "",
+      "detect": {
+        "displayName": [
+          "Yandex*",
+          "Яндекс*"
+        ],
+        "minVersion": ""
+      },
       "profiles": [
         "base",
         "browser"
@@ -191,6 +241,14 @@
       "nasPath": "CryptoPro/csp-x64-rus.msi",
       "installerArgs": "/qn /norestart",
       "installerUrl": "",
+      "detect": {
+        "displayName": [
+          "КриптоПро CSP*",
+          "Крипто-Про CSP*",
+          "CryptoPro CSP*"
+        ],
+        "minVersion": ""
+      },
       "checksums": {
         "md5": "326921D3551F371FCB2DCCB7F183FCC4",
         "sha256": "",
@@ -220,6 +278,14 @@
       "nasPath": "CryptoPro/cadesplugin.exe",
       "installerArgs": "-silent -norestart -noyandex -noroot",
       "installerUrl": "",
+      "detect": {
+        "displayName": [
+          "КриптоПро ЭЦП Browser plug-in*",
+          "CryptoPro EDS Browser plug-in*",
+          "Крипто*plug-in*"
+        ],
+        "minVersion": ""
+      },
       "profiles": [
         "base",
         "crypto"
@@ -250,6 +316,7 @@
       "nasPath": "Kontur/Certificates_Kontur_Admin.exe",
       "installerArgs": "",
       "installerUrl": "",
+      "detect": {},
       "timeoutSeconds": 300,
       "profiles": [
         "base",
@@ -273,6 +340,15 @@
       "nasPath": "Aspia/aspia-host-x86_64.msi",
       "installerArgs": "/qn /norestart",
       "installerUrl": "",
+      "detect": {
+        "displayName": [
+          "Aspia Host*"
+        ],
+        "minVersion": "",
+        "path": [
+          "%ProgramFiles%\\Aspia\\Host\\aspia_host.exe"
+        ]
+      },
       "postInstall": {
         "nasPath": "Aspia/aspia-host-config.json",
         "executable": "%ProgramFiles%\\Aspia\\Host\\aspia_host.exe",
@@ -303,6 +379,12 @@
       "nasPath": "VLC/vlc-win64.exe",
       "installerArgs": "/S",
       "installerUrl": "",
+      "detect": {
+        "displayName": [
+          "VLC media player*"
+        ],
+        "minVersion": ""
+      },
       "profiles": [
         "extra"
       ],
@@ -315,6 +397,12 @@
       "nasPath": "Far/Far-x64.msi",
       "installerArgs": "/qn /norestart",
       "installerUrl": "",
+      "detect": {
+        "displayName": [
+          "Far Manager*"
+        ],
+        "minVersion": ""
+      },
       "profiles": [
         "extra"
       ]

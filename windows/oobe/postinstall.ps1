@@ -39,6 +39,10 @@
     задавайте, иначе установка будет ждать ввода. Если консоль неинтерактивна,
     ключ игнорируется с предупреждением.
 
+.PARAMETER Reinstall
+    Ставить пакеты, даже если они уже установлены. По умолчанию такие шаги
+    пропускаются: проверка идёт по полю detect в postinstall.json.
+
 .PARAMETER NoPrompt
     Ничего не спрашивать и не ждать подтверждения. Обязателен при запуске из
     FirstLogonCommands: там сеанс интерактивный, и без этого ключа первый вход
@@ -75,6 +79,7 @@ param(
     [string[]]$Exclude,
     [switch]$Select,
     [switch]$NoPrompt,
+    [switch]$Reinstall,
     [string]$ConfigPath,
     [string]$ConfigUri = 'https://raw.githubusercontent.com/gpas45/scripts/main/windows/oobe/postinstall.json',
     [ValidateSet('http', 'smb')]
@@ -98,6 +103,7 @@ $script:WorkDir = Join-Path -Path $env:TEMP -ChildPath 'oobe-postinstall'
 $script:Winget = $null
 $script:NasHttpHeaders = $null
 $script:WingetVersion = $null
+$script:InstalledEntries = $null
 $script:RebootRequired = $false
 
 New-Item -ItemType Directory -Force -Path $script:WorkDir | Out-Null
@@ -614,6 +620,96 @@ function Invoke-Winget {
             catch { Write-Verbose 'Не удалось вернуть кодировку консоли.' }
         }
     }
+}
+
+function Get-InstalledEntry {
+    # Список установленного читается один раз: три ветки деинсталляции,
+    # 32- и 64-битная машинные плюс пользовательская.
+    if ($null -ne $script:InstalledEntries) { return $script:InstalledEntries }
+
+    $roots = @(
+        'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall',
+        'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall',
+        'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall'
+    )
+    $entries = foreach ($root in $roots) {
+        Get-ChildItem -LiteralPath $root -ErrorAction SilentlyContinue | ForEach-Object {
+            $properties = Get-ItemProperty -LiteralPath $_.PSPath -ErrorAction SilentlyContinue
+            if ($properties.DisplayName) {
+                [PSCustomObject]@{
+                    DisplayName    = $properties.DisplayName
+                    DisplayVersion = $properties.DisplayVersion
+                }
+            }
+        }
+    }
+    $script:InstalledEntries = @($entries)
+    return $script:InstalledEntries
+}
+
+function ConvertTo-ComparableVersion {
+    param([string]$Value)
+    if ([string]::IsNullOrWhiteSpace($Value)) { return $null }
+
+    # Версии в реестре бывают с хвостом: 7.1.0-beta, 25.01.0 (x64) и прочее.
+    # Берём ведущие числовые части, остальное отбрасываем.
+    $match = [regex]::Match($Value.Trim(), '^\d+(\.\d+){0,3}')
+    if (-not $match.Success) { return $null }
+
+    $text = $match.Value
+    if ($text -notmatch '\.') { $text = "$text.0" }
+    try { return [version]$text }
+    catch { return $null }
+}
+
+function Test-ApplicationInstalled {
+    param($Item)
+
+    if (-not $Item.PSObject.Properties['detect'] -or -not $Item.detect) { return $false }
+    $detect = $Item.detect
+
+    $found = $null
+    if ($detect.PSObject.Properties['displayName'] -and $detect.displayName) {
+        foreach ($pattern in @($detect.displayName)) {
+            $found = Get-InstalledEntry | Where-Object { $_.DisplayName -like $pattern } | Select-Object -First 1
+            if ($found) { break }
+        }
+    }
+
+    if (-not $found) {
+        # Запись о деинсталляции есть не у всего; тогда смотрим файл.
+        if ($detect.PSObject.Properties['path'] -and $detect.path) {
+            foreach ($candidate in @($detect.path)) {
+                $expanded = [Environment]::ExpandEnvironmentVariables($candidate)
+                if (Test-Path -LiteralPath $expanded) {
+                    Write-Host "  уже установлено, найден $expanded"
+                    return $true
+                }
+            }
+        }
+        return $false
+    }
+
+    $shown = if ($found.DisplayVersion) { "$($found.DisplayName) $($found.DisplayVersion)" } else { $found.DisplayName }
+
+    if (-not $detect.PSObject.Properties['minVersion'] -or -not $detect.minVersion) {
+        Write-Host "  уже установлено: $shown"
+        return $true
+    }
+
+    $installed = ConvertTo-ComparableVersion -Value $found.DisplayVersion
+    $required = ConvertTo-ComparableVersion -Value $detect.minVersion
+    if (-not $installed -or -not $required) {
+        Write-Warning "  установлено $shown, но сравнить с $($detect.minVersion) не удалось — пропускаю."
+        return $true
+    }
+    if ($installed -ge $required) {
+        Write-Host "  уже установлено: $shown (не ниже $($detect.minVersion))"
+        return $true
+    }
+
+    Write-Host "  установлено $shown, это ниже $($detect.minVersion) — обновляю."
+    return $false
 }
 
 function Install-WithWinget {
@@ -1509,6 +1605,10 @@ if (-not $SkipSoftware -and $config.PSObject.Properties['software']) {
     }
     foreach ($item in $plannedSoftware) {
         Write-Host "- $($item.name)"
+        if (-not $Reinstall -and (Test-ApplicationInstalled -Item $item)) {
+            Write-Host '  пропускаю.' -ForegroundColor DarkGray
+            continue
+        }
         Invoke-Safely -Label $item.name -Action { Install-Application -Item $item -Nas $nas }
     }
 }

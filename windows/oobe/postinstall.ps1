@@ -969,9 +969,23 @@ function New-OfficeConfiguration {
     }
     $exclude = if ($apps.Count -gt 0) { @($known | Where-Object { $apps -notcontains $_ }) } else { @() }
 
+    # Атрибуты <Add>. SourcePath и Version — то, что позволяет ставить Office
+    # из заранее выкачанной папки, не обращаясь к CDN Microsoft.
+    $addAttributes = New-Object System.Collections.Generic.List[string]
+    $addAttributes.Add(('OfficeClientEdition="{0}"' -f $edition))
+    $addAttributes.Add(('Channel="{0}"' -f $channel))
+    if ($Office.sourcePath) {
+        $addAttributes.Add(('SourcePath="{0}"' -f $Office.sourcePath))
+        $addAttributes.Add(('AllowCdnFallback="{0}"' -f $(if ($Office.allowCdnFallback) { 'TRUE' } else { 'FALSE' })))
+    }
+    if ($Office.version) {
+        $addAttributes.Add(('Version="{0}"' -f $Office.version))
+    }
+    $addAttributes.Add('MigrateArch="TRUE"')
+
     $sb = New-Object System.Text.StringBuilder
     [void]$sb.AppendLine('<Configuration>')
-    [void]$sb.AppendLine(('  <Add OfficeClientEdition="{0}" Channel="{1}" MigrateArch="TRUE">' -f $edition, $channel))
+    [void]$sb.AppendLine(('  <Add {0}>' -f ($addAttributes -join ' ')))
     if ($Office.pidKey) {
         [void]$sb.AppendLine(('    <Product ID="{0}" PIDKEY="{1}">' -f $productId, $Office.pidKey))
     }
@@ -987,7 +1001,19 @@ function New-OfficeConfiguration {
     [void]$sb.AppendLine('    </Product>')
     [void]$sb.AppendLine('  </Add>')
     if ($Office.removeMsi) { [void]$sb.AppendLine('  <RemoveMSI />') }
-    [void]$sb.AppendLine(('  <Updates Enabled="TRUE" Channel="{0}" />' -f $channel))
+
+    if ($Office.updatesEnabled) {
+        $updates = New-Object System.Collections.Generic.List[string]
+        $updates.Add('Enabled="TRUE"')
+        if ($Office.updatePath) { $updates.Add(('UpdatePath="{0}"' -f $Office.updatePath)) }
+        $updates.Add(('Channel="{0}"' -f $channel))
+        [void]$sb.AppendLine(('  <Updates {0} />' -f ($updates -join ' ')))
+    }
+    else {
+        # Без доступа к CDN включённое автообновление даёт лишь бесконечные
+        # фоновые попытки достучаться до недоступного сервера.
+        [void]$sb.AppendLine('  <Updates Enabled="FALSE" />')
+    }
     [void]$sb.AppendLine('  <Property Name="SharedComputerLicensing" Value="0" />')
     [void]$sb.AppendLine('  <Property Name="FORCEAPPSHUTDOWN" Value="TRUE" />')
     [void]$sb.AppendLine('  <Property Name="PinIconsToTaskbar" Value="FALSE" />')
@@ -1001,6 +1027,13 @@ function New-OfficeConfiguration {
     Write-Host "  конфигурация собрана: $productId, канал $channel, $edition-бит"
     Write-Host "  ставим: $installed"
     if ($exclude) { Write-Host "  исключаем: $($exclude -join ', ')" }
+    if ($Office.sourcePath) {
+        $pinned = if ($Office.version) { "сборка $($Office.version)" } else { 'сборка не закреплена' }
+        Write-Host "  источник: $($Office.sourcePath), $pinned"
+    }
+    else {
+        Write-Warning '  источник не задан — ODT будет качать Office с CDN Microsoft.'
+    }
 }
 
 function Install-Office {
@@ -1045,6 +1078,16 @@ function Install-Office {
     }
     if (-not $config) {
         # Готового XML не задали — собираем из полей конфига.
+        if (-not $Office.sourcePath -and $Office.sourceNasPath) {
+            if ($nasReady -and $Nas.type -eq 'smb') {
+                $resolved = Join-Path -Path $script:NasSharePath -ChildPath ($Office.sourceNasPath -replace '/', '\')
+                $Office | Add-Member -NotePropertyName sourcePath -NotePropertyValue $resolved -Force
+            }
+            else {
+                Write-Warning "  office.sourceNasPath работает только по SMB: ODT принимает локальный или UNC-путь, но не HTTP-адрес."
+                Write-Warning '  Подключите раздачу как диск и задайте office.sourcePath явно, иначе Office пойдёт на CDN Microsoft.'
+            }
+        }
         $config = Join-Path -Path $script:WorkDir -ChildPath 'office-configuration.xml'
         New-OfficeConfiguration -Office $Office -Path $config
     }

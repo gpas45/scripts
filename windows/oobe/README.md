@@ -212,9 +212,9 @@ https://oobe.dioservice.ru/Deploy/
 │  ├─ Russian_Trusted_Root_CA.cer
 │  ├─ Russian_Trusted_Sub_CA.cer
 │  └─ Russian_Trusted_Sub_CA_2024.cer
-└─ Office\ODT\
-   ├─ setup.exe
-   └─ configuration-ProPlus2021Volume.xml
+└─ Office\
+   ├─ ODT\setup.exe
+   └─ Source\Office\Data\…      (дистрибутив, выкачанный setup.exe /download)
 ```
 
 Имена файлов без номеров версий — при обновлении дистрибутива переименуйте его,
@@ -718,6 +718,60 @@ Word, Excel, PowerPoint — даёт восемь `ExcludeApp`. Опечатка
 > Project и Visio — отдельные продукты ODT (`ProjectPro2024Volume`,
 > `VisioPro2024Volume`), а не компоненты. Через `apps` их не поставить, нужен
 > свой `configuration.xml` со вторым блоком `<Product>`.
+
+#### Установка без доступа к CDN Microsoft
+
+По умолчанию ODT качает дистрибутив с серверов Microsoft. Если туда не
+достучаться, Office ставится из заранее выкачанной папки — тот же двухшаговый
+приём, что в [farag2/Install-Office](https://github.com/farag2/Install-Office):
+сначала `setup.exe /download`, потом `setup.exe /configure`.
+
+**Шаг 1, один раз, на машине с доступом.** Положите рядом `setup.exe` из ODT и
+`configuration-ProPlus2024Volume.xml` из [`office/`](office/) и выполните:
+
+```cmd
+setup.exe /download configuration-ProPlus2024Volume.xml
+```
+
+Рядом появится каталог `Office\Data\<версия>\…` — это и есть дистрибутив.
+Сообщений в консоли не будет, ориентируйтесь по размеру папки.
+
+**Шаг 2.** Выложите на раздачу:
+
+```
+Deploy\Office\
+├─ ODT\setup.exe
+└─ Source\Office\Data\…
+```
+
+**Шаг 3.** Заполните в `postinstall.json`:
+
+```json
+"sourceNasPath": "Office/Source",
+"version": "16.0.17932.20306",
+"allowCdnFallback": false,
+"updatesEnabled": false
+```
+
+Что это даёт:
+
+| Поле | Зачем |
+|---|---|
+| `sourceNasPath` / `sourcePath` | Откуда брать файлы. Без этого ODT идёт на CDN |
+| `version` | Закрепляет сборку. Без неё ODT сверяется с CDN, даже имея локальный источник |
+| `allowCdnFallback: false` | Не добирать недостающее из интернета: лучше внятная ошибка, чем долгое ожидание недоступного сервера |
+| `updatesEnabled: false` | Иначе Office будет бесконечно и безуспешно ходить за обновлениями. Если обновления есть откуда брать, включите и задайте `updatePath` |
+
+Версию возьмите из имени каталога внутри `Office\Data`.
+
+> `sourceNasPath` работает только при `nas.type = smb`: ODT принимает локальный
+> или UNC-путь, но не HTTP-адрес. При раздаче по HTTPS подключите её как диск
+> и задайте `sourcePath` явно (`Z:\Office\Source`). Если источник не задан
+> вовсе, скрипт предупредит об этом в логе перед установкой.
+
+> `setup.exe` из ODT тоже скачивается от Microsoft. Добудьте его один раз
+> и положите на раздачу — `setupNasPath` указывает именно туда. Вариант
+> «поставить ODT через winget» работает только при доступе к Microsoft.
 
 ## Учётная запись и пароль
 

@@ -129,13 +129,20 @@ function Write-Step {
 function Invoke-Safely {
     param(
         [string]$Label,
-        [scriptblock]$Action
+        [scriptblock]$Action,
+        # Шаг, от которого ничего не зависит: о неудаче сообщаем, но в итог
+        # её не выносим, иначе рабочая станция «не настроена» из-за мелочи.
+        [switch]$Optional
     )
     try {
         & $Action
         Write-Host "  [ok] $Label" -ForegroundColor DarkGreen
     }
     catch {
+        if ($Optional) {
+            Write-Warning "  [~] $Label — $($_.Exception.Message) (шаг необязательный, пропускаю)"
+            return
+        }
         $script:Failures.Add("$Label — $($_.Exception.Message)")
         Write-Warning "  [!] $Label — $($_.Exception.Message)"
     }
@@ -1103,6 +1110,133 @@ function Connect-WebDavPath {
     return $false
 }
 
+function Get-OfficeSourceInfo {
+    param([string]$Path)
+
+    # Раскладка выкачанного дистрибутива у ODT фиксированная:
+    #   <источник>\Office\Data\v64.cab
+    #   <источник>\Office\Data\<версия>\stream.x64.<язык>.dat
+    # Поэтому по папке видно и сборку, и разрядность, и языки — то есть ровно
+    # то, из-за несовпадения чего setup.exe падает без внятного сообщения.
+    $info = [pscustomobject]@{
+        Path      = $Path
+        DataPath  = $null
+        Versions  = @()
+        Editions  = @()
+        Languages = @()
+    }
+    if ([string]::IsNullOrWhiteSpace($Path)) { return $info }
+
+    $data = Join-Path -Path $Path -ChildPath 'Office\Data'
+    if (-not (Test-Path -LiteralPath $data)) { return $info }
+    $info.DataPath = $data
+
+    $info.Versions = @(
+        Get-ChildItem -LiteralPath $data -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -match '^\d+(\.\d+){3}$' } |
+            Sort-Object { [version]$_.Name } |
+            Select-Object -ExpandProperty Name
+    )
+
+    $editions = New-Object System.Collections.Generic.List[string]
+    $languages = New-Object System.Collections.Generic.List[string]
+    foreach ($version in $info.Versions) {
+        $folder = Join-Path -Path $data -ChildPath $version
+        foreach ($file in @(Get-ChildItem -LiteralPath $folder -Filter 'stream.*.dat' -ErrorAction SilentlyContinue)) {
+            $match = [regex]::Match($file.Name, '^stream\.(x86|x64)\.(.+)\.dat$')
+            if (-not $match.Success) { continue }
+            $edition = if ($match.Groups[1].Value -eq 'x64') { '64' } else { '32' }
+            if ($editions -notcontains $edition) { $editions.Add($edition) }
+            $language = $match.Groups[2].Value
+            # x-none — это общие для всех языков файлы, а не язык интерфейса.
+            if ($language -ne 'x-none' -and $languages -notcontains $language) { $languages.Add($language) }
+        }
+    }
+    $info.Editions = $editions.ToArray()
+    $info.Languages = $languages.ToArray()
+    return $info
+}
+
+function Test-OfficeSource {
+    param(
+        $Office,
+        [string]$Path
+    )
+    # Проверяем источник до запуска setup.exe: ODT на несовпадение сборки,
+    # разрядности или языка отвечает числовым кодом без пояснений, а здесь
+    # сразу видно, чего именно не хватает на раздаче.
+    $info = Get-OfficeSourceInfo -Path $Path
+    if (-not $info.DataPath) {
+        throw ("в источнике $Path нет каталога Office\Data. " +
+            'Положите туда дистрибутив, выкачанный Download-Office.ps1 ' +
+            '(setup.exe /download), а не установочные файлы как есть.')
+    }
+    if (-not $info.Versions) {
+        throw "в $($info.DataPath) нет папки сборки вида 16.0.17932.20306 — загрузка дистрибутива не завершена."
+    }
+
+    Write-Host "  в источнике: сборки $($info.Versions -join ', ')"
+    if ($info.Languages) { Write-Host "  языки в источнике: $($info.Languages -join ', ')" }
+
+    $edition = if ($Office.edition) { $Office.edition } else { '64' }
+    if ($info.Editions -and $info.Editions -notcontains $edition) {
+        throw ("в источнике нет $edition-битной сборки (есть: $($info.Editions -join ', ') бит). " +
+            'Поменяйте office.edition или выкачайте нужную разрядность.')
+    }
+
+    $requested = if ($Office.languages) { @($Office.languages) } else { @('ru-ru') }
+    if ($info.Languages) {
+        $available = @($requested | Where-Object { $info.Languages -contains $_ })
+        $missing = @($requested | Where-Object { $info.Languages -notcontains $_ })
+        if (-not $available) {
+            throw ("в источнике нет ни одного из запрошенных языков ($($requested -join ', ')); " +
+                "есть только: $($info.Languages -join ', '). Поправьте office.languages.")
+        }
+        if ($missing) {
+            # Из-за отсутствующего дополнительного языка валить всю установку
+            # смысла нет: ставим то, что есть, но в логе это должно быть видно.
+            Write-Warning "  в источнике нет языков: $($missing -join ', ') — ставлю только $($available -join ', ')."
+            $Office | Add-Member -NotePropertyName languages -NotePropertyValue $available -Force
+        }
+    }
+
+    if ($Office.version) {
+        if ($info.Versions -notcontains $Office.version) {
+            throw ("в источнике нет сборки $($Office.version) (есть: $($info.Versions -join ', ')). " +
+                'Поправьте office.version или оставьте его пустым.')
+        }
+        return
+    }
+
+    # Без Version ODT идёт за номером последней сборки на CDN Microsoft даже
+    # при локальном источнике — закрепляем то, что реально лежит на раздаче.
+    $pinned = @($info.Versions)[-1]
+    $Office | Add-Member -NotePropertyName version -NotePropertyValue $pinned -Force
+    Write-Host "  сборка не была закреплена — ставим $pinned из источника"
+}
+
+function Get-OdtLogExcerpt {
+    param(
+        [string]$Directory,
+        [datetime]$Since,
+        [int]$Lines = 15
+    )
+    if (-not (Test-Path -LiteralPath $Directory)) { return $null }
+    $log = Get-ChildItem -LiteralPath $Directory -Filter '*.log' -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.LastWriteTime -ge $Since.AddMinutes(-2) } |
+        Sort-Object LastWriteTime -Descending |
+        Select-Object -First 1
+    if (-not $log) { return $null }
+
+    $content = @(Get-Content -LiteralPath $log.FullName -ErrorAction SilentlyContinue)
+    $interesting = @($content | Where-Object { $_ -match 'ErrorCode|Error Code|error code|Exception|Failed|failure|not available|Blocking' })
+    if (-not $interesting) { $interesting = $content }
+    return [pscustomobject]@{
+        Path  = $log.FullName
+        Lines = @($interesting | Select-Object -Last $Lines)
+    }
+}
+
 function New-OfficeConfiguration {
     param(
         $Office,
@@ -1304,9 +1438,36 @@ function Install-Office {
         New-OfficeConfiguration -Office $Office -Path $config
     }
 
+    if ($Office.sourcePath -and -not $Office.configPath -and -not $Office.configNasPath -and -not $Office.configUri) {
+        Test-OfficeSource -Office $Office -Path $Office.sourcePath
+        # Version мог закрепиться только что — пересобираем конфигурацию.
+        New-OfficeConfiguration -Office $Office -Path $config
+    }
+
+    $logDir = Join-Path -Path $env:ProgramData -ChildPath 'oobe'
+    if (-not (Test-Path -LiteralPath $logDir)) {
+        New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+    }
+
     Write-Host "  ODT: $setup /configure $config"
+    $started = Get-Date
     $proc = Start-Process -FilePath $setup -ArgumentList @('/configure', $config) -Wait -PassThru
-    if ($proc.ExitCode -ne 0) { throw "setup.exe вернул код $($proc.ExitCode)." }
+    $exitCode = $proc.ExitCode
+    if ($exitCode -eq 0) { return }
+
+    # Код возврата ODT сам по себе не говорит ничего: в его логе есть строка
+    # с настоящей причиной, и без неё разбираться не с чем.
+    Write-Warning "  setup.exe вернул код $exitCode. Использованная конфигурация:"
+    foreach ($line in (Get-Content -LiteralPath $config -ErrorAction SilentlyContinue)) {
+        Write-Host "    $line"
+    }
+    $excerpt = Get-OdtLogExcerpt -Directory $logDir -Since $started
+    if ($excerpt) {
+        Write-Warning "  лог ODT: $($excerpt.Path)"
+        foreach ($line in $excerpt.Lines) { Write-Host "    $line" }
+        throw "setup.exe вернул код $exitCode, подробности в $($excerpt.Path) (ключевые строки выше в логе)."
+    }
+    throw "setup.exe вернул код $exitCode. Лог ODT не найден в $logDir."
 }
 
 # --- Реестр и система --------------------------------------------------------
@@ -1327,7 +1488,24 @@ function Set-RegistryTweak {
     }
 
     $type = if ($Tweak.PSObject.Properties['type'] -and $Tweak.type) { $Tweak.type } else { 'DWord' }
-    New-ItemProperty -LiteralPath $Tweak.path -Name $name -PropertyType $type -Value $Tweak.value -Force | Out-Null
+    try {
+        New-ItemProperty -LiteralPath $Tweak.path -Name $name -PropertyType $type -Value $Tweak.value -Force | Out-Null
+        return
+    }
+    catch {
+        # -Force у New-ItemProperty пересоздаёт значение, то есть требует прав
+        # и на удаление. Часть значений Explorer система держит под своей ACL
+        # (так закрыт, например, TaskbarDa в Windows 11), а перезапись на
+        # месте при этом проходит — пробуем её, прежде чем сдаваться.
+        $failure = $_
+    }
+
+    try {
+        Set-ItemProperty -LiteralPath $Tweak.path -Name $name -Value $Tweak.value -ErrorAction Stop
+    }
+    catch {
+        throw $failure
+    }
 }
 
 function Remove-OneDrive {
@@ -1621,7 +1799,8 @@ if (-not $SkipOffice -and $config.PSObject.Properties['office'] -and $config.off
 if (-not $SkipRegistry -and $config.PSObject.Properties['registry']) {
     Write-Step 'Правки реестра'
     foreach ($tweak in $plannedTweaks) {
-        Invoke-Safely -Label $tweak.description -Action { Set-RegistryTweak -Tweak $tweak }
+        $optional = [bool]($tweak.PSObject.Properties['optional'] -and $tweak.optional)
+        Invoke-Safely -Label $tweak.description -Action { Set-RegistryTweak -Tweak $tweak } -Optional:$optional
     }
 }
 

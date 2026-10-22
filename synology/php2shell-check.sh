@@ -342,12 +342,20 @@ check_exposure() {
     fi
 
     if command -v pgrep >/dev/null 2>&1; then
-        fpm_count=$(pgrep -c 'php-fpm' 2>/dev/null)
+        # -f обязателен: мастер FPM виден как «php-fpm: master process (...)»,
+        # и по одному лишь имени процесса pgrep его не находит.
+        fpm_count=$(pgrep -fc 'php-fpm' 2>/dev/null)
         fpm_count=${fpm_count:-0}
         printf 'Процессов php-fpm: %s\n' "$fpm_count"
         if [ "$fpm_count" -gt 0 ]; then
             printf '%sPHP реально обслуживает запросы — риск высокий, если сайт доступен извне.%s\n' \
                 "$C_YELLOW" "$C_OFF"
+        elif [ "$USAGE_FOUND" -eq 1 ]; then
+            # Пакеты DSM поднимают свои пулы FPM по требованию, поэтому ноль
+            # процессов в момент проверки не означает, что PHP недостижим.
+            printf '%sПроцессов нет, но PHP используется пакетами DSM.%s\n' \
+                "$C_YELLOW" "$C_OFF"
+            printf 'Пулы FPM запускаются по требованию — не считайте это безопасным.\n'
         else
             printf 'PHP-FPM не запущен — поверхность атаки меньше, но пакет всё равно обновите.\n'
         fi

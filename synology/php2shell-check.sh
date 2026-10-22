@@ -29,6 +29,8 @@ FIXED_8_5=12
 VULN_COUNT=0
 UNKNOWN_COUNT=0
 PHP_FOUND=0
+USAGE_FOUND=0
+PHP_PKG_LIST=''
 
 # Цвета только для интерактивного терминала
 if [ -t 1 ]; then
@@ -185,11 +187,85 @@ check_php_packages() {
         version=$(get_info_field "$info" version)
         [ -n "$version" ] || continue
         PHP_FOUND=$((PHP_FOUND + 1))
+        PHP_PKG_LIST="${PHP_PKG_LIST}${pkg}
+"
         verdict "$pkg" "$version"
     done
 
     if [ "$PHP_FOUND" -eq 0 ]; then
         printf '%sПакеты PHP не установлены — PHP2Shell не применим.%s\n' "$C_GREEN" "$C_OFF"
+    fi
+}
+
+# Кто на NAS использует PHP: зависимости пакетов, задачи cron, Web Station.
+# Нужно, чтобы понять, можно ли удалить пакет вместо ожидания патча.
+#
+# Проверка намеренно осторожна: Web Station назначает PHP-профили сайтам
+# через свой интерфейс, и надёжно прочитать это из файлов нельзя. Поэтому
+# «ничего не найдено» формулируется как предположение, а не как разрешение
+# удалять — ложный вывод здесь стоит дороже лишней проверки руками.
+check_php_usage() {
+    header "Кто использует PHP"
+
+    if [ "$PHP_FOUND" -eq 0 ]; then
+        printf 'Пропущено: пакеты PHP не установлены.\n'
+        return
+    fi
+
+    local php_pkg info dep_pkg deps users cron_hits
+
+    # 1. Пакеты, объявившие PHP зависимостью в своём INFO
+    while IFS= read -r php_pkg; do
+        [ -n "$php_pkg" ] || continue
+        users=''
+        for info in /var/packages/*/INFO; do
+            [ -f "$info" ] || continue
+            dep_pkg=$(get_info_field "$info" package)
+            [ -n "$dep_pkg" ] || continue
+            [ "$dep_pkg" = "$php_pkg" ] && continue
+            deps="$(get_info_field "$info" install_dep_packages) "
+            deps="${deps}$(get_info_field "$info" start_dep_services)"
+            case "$deps" in
+                *"$php_pkg"*) users="${users}${users:+, }${dep_pkg}" ;;
+            esac
+        done
+        if [ -n "$users" ]; then
+            printf '%s — объявлен зависимостью пакетов: %s\n' "$php_pkg" "$users"
+            USAGE_FOUND=1
+        else
+            printf '%s — ни один пакет не объявил его зависимостью\n' "$php_pkg"
+        fi
+    done <<< "$PHP_PKG_LIST"
+
+    # 2. Задачи планировщика, вызывающие php
+    if [ -r /etc/crontab ]; then
+        cron_hits=$(grep -c 'php' /etc/crontab 2>/dev/null)
+        cron_hits=${cron_hits:-0}
+        if [ "$cron_hits" -gt 0 ]; then
+            printf '\nСтрок с "php" в /etc/crontab: %s\n' "$cron_hits"
+            grep -n 'php' /etc/crontab 2>/dev/null | cut -c1-100 | sed 's/^/  /'
+            printf 'Проверьте глазами: совпадение по имени ещё не значит запуск PHP.\n'
+            USAGE_FOUND=1
+        else
+            printf '\nВ /etc/crontab задач с php нет.\n'
+        fi
+    else
+        printf '\n/etc/crontab недоступен — задачи планировщика не проверены.\n'
+    fi
+
+    # 3. Web Station раздаёт PHP сайтам через профили — только ручная проверка
+    if [ -f /var/packages/WebStation/INFO ]; then
+        printf '\n%sУстановлен Web Station%s — сайты могут использовать PHP через профили.\n' \
+            "$C_YELLOW" "$C_OFF"
+        printf 'Проверьте в интерфейсе: Web Station -> Веб-сервисы и Профили PHP.\n'
+        USAGE_FOUND=1
+    fi
+
+    if [ "$USAGE_FOUND" -eq 0 ]; then
+        printf '\n%sПризнаков использования PHP не найдено.%s\n' "$C_GREEN" "$C_OFF"
+        printf 'Пакет, вероятно, можно удалить — это закрыло бы уязвимость полностью.\n'
+        printf 'Перед удалением убедитесь, что PHP не нужен вашим собственным скриптам:\n'
+        printf 'их вызовы эта проверка не видит.\n'
     fi
 }
 
@@ -305,7 +381,12 @@ summary() {
         printf '     (закрыть порты, поставить перед ним WAF/reverse proxy).\n'
         printf '  3. Временно: session.upload_progress.enabled = Off в профиле PHP.\n'
         printf '     Закрывает подтверждённый путь CVE-2026-109619, но не CVE-2026-109618.\n'
-        printf '  4. Если PHP ничем не используется — удалить пакет.\n'
+        if [ "$USAGE_FOUND" -eq 0 ]; then
+            printf '  4. Признаков использования PHP не найдено — удаление пакета\n'
+            printf '     закрыло бы вопрос полностью, не дожидаясь патча.\n'
+        else
+            printf '  4. Если PHP ничем не используется — удалить пакет.\n'
+        fi
         return 1
     fi
 
@@ -318,6 +399,7 @@ main() {
         "$C_BOLD" "$C_OFF"
     check_platform
     check_php_packages
+    check_php_usage
     check_upload_progress
     check_exposure
     summary

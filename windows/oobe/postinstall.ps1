@@ -1210,11 +1210,43 @@ function ConvertTo-WebDavPath {
     return '\\{0}\{1}' -f $server, $path
 }
 
+function Set-WebClientLimit {
+    # Клиент WebDAV по умолчанию отказывается брать файл больше 50 МБ:
+    # «Размер файла превышает установленное ограничение» (ошибка 223). Для
+    # дистрибутива Office, где stream.x64.<язык>.dat измеряется гигабайтами,
+    # это запрет на всё. Поднимаем до потолка, который принимает сам клиент,
+    # — 4 ГБ (0xFFFFFFFF); файл больше через WebDAV не пройдёт в принципе.
+    $key = 'HKLM:\SYSTEM\CurrentControlSet\Services\WebClient\Parameters'
+    $limit = 4294967295
+    $changed = $false
+
+    if (-not (Test-Path -LiteralPath $key)) {
+        New-Item -Path $key -Force | Out-Null
+    }
+    # FileAttributesLimitInBytes — предел на объём свойств при листинге
+    # каталога; на больших папках без него листинг обрывается.
+    foreach ($name in @('FileSizeLimitInBytes', 'FileAttributesLimitInBytes')) {
+        $current = (Get-ItemProperty -LiteralPath $key -Name $name -ErrorAction SilentlyContinue).$name
+        if ($current -eq $limit) { continue }
+        try {
+            New-ItemProperty -LiteralPath $key -Name $name -PropertyType DWord -Value $limit -Force | Out-Null
+            $changed = $true
+        }
+        catch {
+            Write-Warning "  не удалось поднять $name`: $($_.Exception.Message)"
+        }
+    }
+    return $changed
+}
+
 function Connect-WebDavPath {
     param(
         [string]$Path,
         $Nas
     )
+    # Ограничения читаются службой при запуске, поэтому правим их до него.
+    $limitChanged = Set-WebClientLimit
+
     # На клиентских редакциях служба WebClient запускается по требованию,
     # и без неё UNC-путь к WebDAV просто не резолвится.
     try {
@@ -1222,6 +1254,11 @@ function Connect-WebDavPath {
         if ($service.Status -ne 'Running') {
             Start-Service -Name 'WebClient' -ErrorAction Stop
             Write-Host '  служба WebClient запущена'
+        }
+        elseif ($limitChanged) {
+            # Служба уже работала со старым пределом — иначе он и останется.
+            Write-Host '  перезапускаю WebClient: поднят предел на размер файла'
+            Restart-Service -Name 'WebClient' -Force -ErrorAction Stop
         }
     }
     catch {
@@ -1385,10 +1422,20 @@ function Copy-OfficeSourceLocally {
     }
 
     $sourceSize = 0
+    $biggest = $null
     foreach ($file in @(Get-ChildItem -LiteralPath $Path -Recurse -File -ErrorAction SilentlyContinue)) {
         $sourceSize += $file.Length
+        if (-not $biggest -or $file.Length -gt $biggest.Length) { $biggest = $file }
     }
     $sourceGb = [math]::Round($sourceSize / 1GB, 2)
+
+    # Через WebDAV файл больше 4 ГБ не пройдёт никаким пределом: это потолок
+    # самого клиента. Лучше сказать сразу, чем после получаса копирования.
+    if ($Path -match '@SSL' -and $biggest -and $biggest.Length -gt 4294967295) {
+        throw ("файл $($biggest.Name) весит $([math]::Round($biggest.Length / 1GB, 2)) ГБ — " +
+            'через WebDAV не передать, предел клиента 4 ГБ. Выложите дистрибутив по SMB ' +
+            '(nas.type = smb) или положите его на машину заранее и укажите office.sourcePath.')
+    }
 
     $drive = Split-Path -Qualifier $target
     $free = (Get-PSDrive -Name $drive.TrimEnd(':') -ErrorAction SilentlyContinue).Free

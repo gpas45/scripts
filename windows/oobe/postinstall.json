@@ -143,6 +143,7 @@
       "wingetId": "Adobe.Acrobat.Reader.64-bit",
       "nasPath": "AdobeReader/AcroRdrDCx64.exe",
       "installerArgs": "/sAll /rs /msi EULA_ACCEPT=YES",
+      "successCodes": [],
       "installerUrl": "",
       "profiles": [
         "base"
@@ -166,6 +167,7 @@
       "wingetId": "",
       "nasPath": "YandexBrowser/Yandex.msi",
       "installerArgs": "/qn /norestart",
+      "successCodes": [],
       "installerUrl": "",
       "profiles": [
         "base",
@@ -275,7 +277,8 @@
         "nasPath": "Aspia/aspia-host-config.json",
         "executable": "%ProgramFiles%\\Aspia\\Host\\aspia_host.exe",
         "arguments": "--import \"{file}\" --silent",
-        "timeoutSeconds": 180
+        "timeoutSeconds": 180,
+        "successCodes": []
       },
       "timeoutSeconds": 600,
       "profiles": [
@@ -346,6 +349,11 @@
       "            активации оставьте пустым. Список GVLK:",
       "            https://learn.microsoft.com/ru-ru/deployoffice/vlactivation/gvlks",
       "",
+      "removeExisting — снять уже установленные продукты Office перед установкой.",
+      "            RemoveMSI убирает только старые MSI-установки, а предустановленные",
+      "            OneNote и Microsoft 365 это Click-to-Run: без <Remove All> ODT",
+      "            обрывается окном «We can't install» со списком продуктов.",
+      "",
       "Установка без выхода на CDN Microsoft:",
       "sourceNasPath — папка с заранее выкачанным дистрибутивом на раздаче.",
       "                Внутри неё должен лежать каталог Office\\Data. Работает",
@@ -394,6 +402,7 @@
     "updatesEnabled": false,
     "updatePath": "",
     "removeMsi": true,
+    "removeExisting": true,
     "displayLevel": "None",
     "setupNasPath": "Office/ODT/setup.exe",
     "configNasPath": "",
@@ -445,6 +454,16 @@
       "description": "Убрать виджеты с панели задач (Windows 11)",
       "path": "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced",
       "name": "TaskbarDa",
+      "type": "DWord",
+      "value": 0,
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "description": "Отключить виджеты политикой (TaskbarDa в HKCU может быть защищён от записи)",
+      "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Dsh",
+      "name": "AllowNewsAndInterests",
       "type": "DWord",
       "value": 0,
       "profiles": [

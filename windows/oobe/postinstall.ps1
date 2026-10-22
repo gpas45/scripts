@@ -718,6 +718,7 @@ function Install-FromFile {
         [string]$Path,
         [string]$Arguments,
         [int]$TimeoutSeconds = 1800,
+        [int[]]$SuccessCodes = @(),
         [switch]$StdinNull
     )
     $extension = [IO.Path]::GetExtension($Path).ToLowerInvariant()
@@ -782,6 +783,10 @@ function Install-FromFile {
     if ($code -eq 3010 -or $code -eq 1641) {
         $script:RebootRequired = $true
         Write-Host '  установщик просит перезагрузку.'
+        return
+    }
+    if ($SuccessCodes -contains $code) {
+        Write-Host "  код $code помечен в конфиге как успешный."
         return
     }
     if ($code -ne 0) { throw "установщик вернул код $code." }
@@ -870,7 +875,11 @@ function Invoke-PostInstallStep {
         throw "шаг после установки не завершился за $timeout с и был прерван."
     }
     $proc.WaitForExit()
-    if ($proc.ExitCode -ne 0) {
+    $allowed = @(0)
+    if ($step.PSObject.Properties['successCodes'] -and $step.successCodes) {
+        $allowed += @($step.successCodes | ForEach-Object { [int]$_ })
+    }
+    if ($allowed -notcontains $proc.ExitCode) {
         throw "шаг после установки вернул код $($proc.ExitCode)."
     }
 }
@@ -893,6 +902,10 @@ function Install-Application {
     # которые stdin не читают, это ничем не мешает. Отключается stdinNull: false.
     $stdinNull = $true
     if ($Item.PSObject.Properties['stdinNull']) { $stdinNull = [bool]$Item.stdinNull }
+    $successCodes = @()
+    if ($Item.PSObject.Properties['successCodes'] -and $Item.successCodes) {
+        $successCodes = @($Item.successCodes | ForEach-Object { [int]$_ })
+    }
 
     if (($source -eq 'auto' -or $source -eq 'nas') -and $Item.nasPath) {
         if (-not $nasReady) {
@@ -905,7 +918,7 @@ function Install-Application {
             $file = Get-NasFile -Nas $Nas -RelativePath $Item.nasPath
             if ($file) {
                 Test-FileChecksum -Path $file -Checksums $Item.checksums
-                Install-FromFile -Path $file -Arguments $Item.installerArgs -TimeoutSeconds $timeout -StdinNull:$stdinNull
+                Install-FromFile -Path $file -Arguments $Item.installerArgs -TimeoutSeconds $timeout -StdinNull:$stdinNull -SuccessCodes $successCodes
                 Copy-ApplicationConfig -Item $Item -Nas $Nas
                 Invoke-PostInstallStep -Item $Item -Nas $Nas
                 return
@@ -929,7 +942,7 @@ function Install-Application {
         $dest = Join-Path -Path $script:WorkDir -ChildPath $name
         Invoke-WebRequest -Uri $Item.installerUrl -OutFile $dest -UseBasicParsing
         Test-FileChecksum -Path $dest -Checksums $Item.checksums
-        Install-FromFile -Path $dest -Arguments $Item.installerArgs -TimeoutSeconds $timeout -StdinNull:$stdinNull
+        Install-FromFile -Path $dest -Arguments $Item.installerArgs -TimeoutSeconds $timeout -StdinNull:$stdinNull -SuccessCodes $successCodes
         Copy-ApplicationConfig -Item $Item -Nas $Nas
         Invoke-PostInstallStep -Item $Item -Nas $Nas
         return
@@ -942,6 +955,56 @@ function Install-Application {
     if ($Item.installerUrl) { $have += 'installerUrl задан' }
     $detail = if ($have.Count -gt 0) { " Задано: $($have -join ', '); при source=$source это не используется." } else { '' }
     throw "нет подходящего источника при source=$source.$detail"
+}
+
+function ConvertTo-WebDavPath {
+    param(
+        [string]$BaseUrl,
+        [string]$RelativePath
+    )
+    # Windows умеет ходить в WebDAV по UNC: \\сервер@SSL\путь, а с нестандартным
+    # портом — \\сервер@SSL@порт\путь. Это позволяет отдать ODT раздачу по
+    # HTTPS, хотя сам он принимает только локальный или UNC-путь.
+    $uri = [uri]$BaseUrl
+    $server = if ($uri.Scheme -eq 'https') { '{0}@SSL' -f $uri.Host } else { $uri.Host }
+    if (-not $uri.IsDefaultPort) { $server = '{0}@{1}' -f $server, $uri.Port }
+
+    $segments = @($uri.AbsolutePath.Trim('/'), $RelativePath.Trim('/')) | Where-Object { $_ }
+    $path = ($segments -join '/') -replace '/', '\'
+    return '\\{0}\{1}' -f $server, $path
+}
+
+function Connect-WebDavPath {
+    param(
+        [string]$Path,
+        $Nas
+    )
+    # На клиентских редакциях служба WebClient запускается по требованию,
+    # и без неё UNC-путь к WebDAV просто не резолвится.
+    try {
+        $service = Get-Service -Name 'WebClient' -ErrorAction Stop
+        if ($service.Status -ne 'Running') {
+            Start-Service -Name 'WebClient' -ErrorAction Stop
+            Write-Host '  служба WebClient запущена'
+        }
+    }
+    catch {
+        Write-Warning "  не удалось запустить службу WebClient: $($_.Exception.Message)"
+        return $false
+    }
+
+    $account = if ($NasUser) { $NasUser } else { $Nas.user }
+    $secret = Get-NasPassword -Nas $Nas
+    if ($account -and $secret) {
+        # Подключаемся к корню ресурса: учётные данные общие на всю раздачу.
+        $parts = @($Path.TrimStart('\') -split '\\' | Where-Object { $_ })
+        $root = '\\{0}\{1}' -f $parts[0], $parts[1]
+        & net.exe use $root $secret /user:$account 2>&1 | Out-Null
+    }
+
+    if (Test-Path -LiteralPath $Path) { return $true }
+    Write-Warning "  WebDAV-путь $Path недоступен."
+    return $false
 }
 
 function New-OfficeConfiguration {
@@ -1019,6 +1082,13 @@ function New-OfficeConfiguration {
         [void]$sb.AppendLine('    </Product>')
     }
     [void]$sb.AppendLine('  </Add>')
+
+    if ($Office.removeExisting) {
+        # RemoveMSI снимает только старые MSI-установки. Предустановленные
+        # OneNote и Microsoft 365 — это Click-to-Run, и без <Remove> установка
+        # обрывается окном «We can't install» со списком продуктов.
+        [void]$sb.AppendLine('  <Remove All="TRUE" />')
+    }
     if ($Office.removeMsi) { [void]$sb.AppendLine('  <RemoveMSI />') }
 
     if ($Office.updatesEnabled) {
@@ -1048,6 +1118,9 @@ function New-OfficeConfiguration {
     if ($exclude) { Write-Host "  исключаем: $($exclude -join ', ')" }
     if ($Office.additionalProducts) {
         Write-Host "  дополнительные продукты: $(@($Office.additionalProducts) -join ', ')"
+    }
+    if ($Office.removeExisting) {
+        Write-Host '  перед установкой снимаем уже установленные продукты Office'
     }
     if ($Office.sourcePath) {
         $pinned = if ($Office.version) { "сборка $($Office.version)" } else { 'сборка не закреплена' }
@@ -1113,14 +1186,22 @@ function Install-Office {
     }
     if (-not $config) {
         # Готового XML не задали — собираем из полей конфига.
-        if (-not $Office.sourcePath -and $Office.sourceNasPath) {
-            if ($nasReady -and $Nas.type -eq 'smb') {
+        if (-not $Office.sourcePath -and $Office.sourceNasPath -and $nasReady) {
+            if ($Nas.type -eq 'smb') {
                 $resolved = Join-Path -Path $script:NasSharePath -ChildPath ($Office.sourceNasPath -replace '/', '\')
                 $Office | Add-Member -NotePropertyName sourcePath -NotePropertyValue $resolved -Force
             }
             else {
-                Write-Warning "  office.sourceNasPath работает только по SMB: ODT принимает локальный или UNC-путь, но не HTTP-адрес."
-                Write-Warning '  Подключите раздачу как диск и задайте office.sourcePath явно, иначе Office пойдёт на CDN Microsoft.'
+                # ODT принимает локальный или UNC-путь, но не HTTP-адрес,
+                # поэтому раздачу по HTTPS отдаём ему через WebDAV-UNC.
+                $webdav = ConvertTo-WebDavPath -BaseUrl $Nas.baseUrl -RelativePath $Office.sourceNasPath
+                Write-Host "  источник по WebDAV: $webdav"
+                if (Connect-WebDavPath -Path $webdav -Nas $Nas) {
+                    $Office | Add-Member -NotePropertyName sourcePath -NotePropertyValue $webdav -Force
+                }
+                else {
+                    Write-Warning '  подключить раздачу по WebDAV не удалось — Office пойдёт на CDN Microsoft.'
+                }
             }
         }
         $config = Join-Path -Path $script:WorkDir -ChildPath 'office-configuration.xml'

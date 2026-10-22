@@ -1068,7 +1068,7 @@
       "type": "DWord",
       "value": 1,
       "profiles": [
-        "office-pv"
+        "base"
       ]
     },
     {
@@ -1078,7 +1078,7 @@
       "type": "DWord",
       "value": 1,
       "profiles": [
-        "office-pv"
+        "base"
       ]
     },
     {
@@ -1088,7 +1088,7 @@
       "type": "DWord",
       "value": 1,
       "profiles": [
-        "office-pv"
+        "base"
       ]
     },
     {
@@ -1098,7 +1098,7 @@
       "type": "DWord",
       "value": 1,
       "profiles": [
-        "office-pv"
+        "base"
       ]
     },
     {
@@ -1108,7 +1108,7 @@
       "type": "DWord",
       "value": 1,
       "profiles": [
-        "office-pv"
+        "base"
       ]
     },
     {
@@ -1118,7 +1118,7 @@
       "type": "DWord",
       "value": 1,
       "profiles": [
-        "office-pv"
+        "base"
       ]
     },
     {
@@ -1128,7 +1128,7 @@
       "type": "DWord",
       "value": 1,
       "profiles": [
-        "office-pv"
+        "base"
       ]
     },
     {
@@ -1138,7 +1138,7 @@
       "type": "DWord",
       "value": 1,
       "profiles": [
-        "office-pv"
+        "base"
       ]
     },
     {
@@ -1148,7 +1148,7 @@
       "type": "DWord",
       "value": 1,
       "profiles": [
-        "office-pv"
+        "base"
       ]
     }
   ],

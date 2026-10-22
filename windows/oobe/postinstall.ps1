@@ -1367,17 +1367,75 @@ function Test-OfficeSource {
     Write-Host "  сборка не была закреплена — ставим $pinned из источника"
 }
 
+function Copy-OfficeSourceLocally {
+    param(
+        $Office,
+        [string]$Path
+    )
+    # Ставит Office не setup.exe, а служба Click-to-Run, работающая от имени
+    # SYSTEM. Наше подключение к раздаче — SMB или WebDAV — заведено в сеансе
+    # пользователя, и SYSTEM о нём ничего не знает: по сети он ходит учётной
+    # записью машины. Отсюда 1603 на источнике, который в проводнике
+    # открывается. Лечится переносом дистрибутива на локальный диск.
+    $target = if ($Office.PSObject.Properties['localCachePath'] -and $Office.localCachePath) {
+        [Environment]::ExpandEnvironmentVariables($Office.localCachePath)
+    }
+    else {
+        Join-Path -Path $env:ProgramData -ChildPath 'oobe\office-source'
+    }
+
+    $sourceSize = 0
+    foreach ($file in @(Get-ChildItem -LiteralPath $Path -Recurse -File -ErrorAction SilentlyContinue)) {
+        $sourceSize += $file.Length
+    }
+    $sourceGb = [math]::Round($sourceSize / 1GB, 2)
+
+    $drive = Split-Path -Qualifier $target
+    $free = (Get-PSDrive -Name $drive.TrimEnd(':') -ErrorAction SilentlyContinue).Free
+    if ($free -and $free -lt ($sourceSize * 1.1)) {
+        throw ("на $drive не хватает места под дистрибутив Office: нужно $sourceGb ГБ, " +
+            "свободно $([math]::Round($free / 1GB, 2)) ГБ. Освободите место или задайте " +
+            'office.localCachePath на другом диске.')
+    }
+
+    Write-Host "  копирую дистрибутив на локальный диск ($sourceGb ГБ): $target"
+    if (Test-Path -LiteralPath $target) {
+        Remove-Item -LiteralPath $target -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    New-Item -ItemType Directory -Path $target -Force | Out-Null
+    # robocopy надёжнее Copy-Item на сетевых источниках: переживает обрывы и
+    # не упирается в длину пути. /NFL /NDL /NP — без простыни на тысячи строк.
+    $output = (& robocopy.exe $Path $target /E /R:2 /W:5 /NFL /NDL /NP /NJH 2>&1 | Out-String).Trim()
+    # robocopy считает успехом коды 0-7; 8 и выше — настоящие ошибки.
+    if ($LASTEXITCODE -ge 8) {
+        throw "не удалось скопировать дистрибутив Office ($Path -> $target), robocopy код $LASTEXITCODE`: $output"
+    }
+    Write-Host '  дистрибутив скопирован.'
+    return $target
+}
+
 function Get-OdtLogExcerpt {
     param(
-        [string]$Directory,
+        [string[]]$Directory,
         [datetime]$Since,
         [int]$Lines = 15
     )
-    if (-not (Test-Path -LiteralPath $Directory)) { return $null }
-    $log = Get-ChildItem -LiteralPath $Directory -Filter '*.log' -File -ErrorAction SilentlyContinue |
-        Where-Object { $_.LastWriteTime -ge $Since.AddMinutes(-2) } |
-        Sort-Object LastWriteTime -Descending |
-        Select-Object -First 1
+    # <Logging Path> слушается только самим setup.exe. Установку выполняет
+    # служба Click-to-Run от имени SYSTEM, и её лог ложится в temp этой
+    # учётной записи — C:\Windows\Temp, — поэтому смотрим во все места.
+    $ours = @('postinstall.log', 'oobe.log')
+    $candidates = New-Object System.Collections.Generic.List[object]
+    foreach ($dir in $Directory) {
+        if (-not $dir) { continue }
+        $expanded = [Environment]::ExpandEnvironmentVariables($dir)
+        if (-not (Test-Path -LiteralPath $expanded)) { continue }
+        foreach ($file in @(Get-ChildItem -LiteralPath $expanded -Filter '*.log' -File -ErrorAction SilentlyContinue)) {
+            if ($ours -contains $file.Name) { continue }
+            if ($file.LastWriteTime -lt $Since.AddMinutes(-2)) { continue }
+            $candidates.Add($file)
+        }
+    }
+    $log = $candidates | Sort-Object LastWriteTime -Descending | Select-Object -First 1
     if (-not $log) { return $null }
 
     $content = @(Get-Content -LiteralPath $log.FullName -ErrorAction SilentlyContinue)
@@ -1590,9 +1648,18 @@ function Install-Office {
         New-OfficeConfiguration -Office $Office -Path $config
     }
 
+    $cached = $null
     if ($Office.sourcePath -and -not $Office.configPath -and -not $Office.configNasPath -and -not $Office.configUri) {
         Test-OfficeSource -Office $Office -Path $Office.sourcePath
-        # Version мог закрепиться только что — пересобираем конфигурацию.
+
+        $copyLocally = $true
+        if ($Office.PSObject.Properties['copySourceLocally']) { $copyLocally = [bool]$Office.copySourceLocally }
+        if ($copyLocally -and $Office.sourcePath.StartsWith('\\')) {
+            $cached = Copy-OfficeSourceLocally -Office $Office -Path $Office.sourcePath
+            $Office | Add-Member -NotePropertyName sourcePath -NotePropertyValue $cached -Force
+        }
+
+        # Version и sourcePath могли измениться только что — пересобираем.
         New-OfficeConfiguration -Office $Office -Path $config
     }
 
@@ -1600,12 +1667,20 @@ function Install-Office {
     if (-not (Test-Path -LiteralPath $logDir)) {
         New-Item -ItemType Directory -Path $logDir -Force | Out-Null
     }
+    $logDirs = @($logDir, (Join-Path -Path $env:SystemRoot -ChildPath 'Temp'), $env:TEMP)
 
     Write-Host "  ODT: $setup /configure $config"
     $started = Get-Date
     $proc = Start-Process -FilePath $setup -ArgumentList @('/configure', $config) -Wait -PassThru
     $exitCode = $proc.ExitCode
-    if ($exitCode -eq 0) { return }
+    if ($exitCode -eq 0) {
+        if ($cached) {
+            # 4 ГБ копии на каждой рабочей станции никому не нужны.
+            Write-Host '  убираю локальную копию дистрибутива.'
+            Remove-Item -LiteralPath $cached -Recurse -Force -ErrorAction SilentlyContinue
+        }
+        return
+    }
 
     # Код возврата ODT сам по себе не говорит ничего: в его логе есть строка
     # с настоящей причиной, и без неё разбираться не с чем.
@@ -1613,13 +1688,16 @@ function Install-Office {
     foreach ($line in (Get-Content -LiteralPath $config -ErrorAction SilentlyContinue)) {
         Write-Host "    $line"
     }
-    $excerpt = Get-OdtLogExcerpt -Directory $logDir -Since $started
+    if ($cached) {
+        Write-Host "  локальная копия дистрибутива оставлена для разбора: $cached"
+    }
+    $excerpt = Get-OdtLogExcerpt -Directory $logDirs -Since $started
     if ($excerpt) {
         Write-Warning "  лог ODT: $($excerpt.Path)"
         foreach ($line in $excerpt.Lines) { Write-Host "    $line" }
         throw "setup.exe вернул код $exitCode, подробности в $($excerpt.Path) (ключевые строки выше в логе)."
     }
-    throw "setup.exe вернул код $exitCode. Лог ODT не найден в $logDir."
+    throw "setup.exe вернул код $exitCode. Лог ODT не найден ни в одном из: $($logDirs -join ', ')."
 }
 
 # --- Реестр и система --------------------------------------------------------

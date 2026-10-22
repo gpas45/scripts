@@ -599,6 +599,19 @@ function Initialize-Winget {
         $bundle = Join-Path -Path $script:WorkDir -ChildPath 'DesktopAppInstaller.msixbundle'
         Invoke-WebRequest -Uri 'https://aka.ms/getwinget' -OutFile $bundle -UseBasicParsing
         Add-AppxPackage -Path $bundle -ErrorAction Stop
+
+        # Add-AppxPackage ставит пакет только текущему пользователю. Для
+        # работы этого достаточно, но sysprep /generalize такую установку
+        # считает ошибкой («installed for a user, but not provisioned for
+        # all users») и отказывается готовить образ. Вносим в образ сразу.
+        try {
+            Add-AppxProvisionedPackage -Online -PackagePath $bundle -SkipLicense -ErrorAction Stop | Out-Null
+            Write-Host '  App Installer внесён в образ для всех пользователей.'
+        }
+        catch {
+            Write-Warning "  App Installer не внесён в образ: $($_.Exception.Message)"
+            Write-Warning '  Для обычной работы это неважно, но sysprep /generalize на этом остановится — см. Test-SysprepReady.ps1.'
+        }
     }
     catch {
         Write-Warning "Не удалось: $($_.Exception.Message)"

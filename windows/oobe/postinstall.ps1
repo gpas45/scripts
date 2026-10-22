@@ -944,6 +944,65 @@ function Install-Application {
     throw "нет подходящего источника при source=$source.$detail"
 }
 
+function New-OfficeConfiguration {
+    param(
+        $Office,
+        [string]$Path
+    )
+    # Набор осей тот же, что у farag2/Install-Office: ветка, канал, компоненты.
+    # ODT принимает не список устанавливаемого, а список исключаемого, поэтому
+    # из apps вычитаем всё остальное.
+    $known = @('Access', 'Bing', 'Excel', 'Groove', 'Lync', 'OneDrive', 'OneNote',
+        'Outlook', 'PowerPoint', 'Publisher', 'Teams', 'Word')
+
+    $edition = if ($Office.edition) { $Office.edition } else { '64' }
+    $productId = if ($Office.productId) { $Office.productId } else { 'ProPlus2024Volume' }
+    $channel = if ($Office.channel) { $Office.channel } else { 'PerpetualVL2024' }
+    $display = if ($Office.displayLevel) { $Office.displayLevel } else { 'None' }
+    $languages = if ($Office.languages) { @($Office.languages) } else { @('ru-ru') }
+    $apps = if ($Office.apps) { @($Office.apps) } else { @() }
+
+    $unknown = @($apps | Where-Object { $known -notcontains $_ })
+    if ($unknown) {
+        # Опечатка в имени иначе молча превратилась бы в «не ставим».
+        throw "в office.apps неизвестные компоненты: $($unknown -join ', '). Допустимые: $($known -join ', ')."
+    }
+    $exclude = if ($apps.Count -gt 0) { @($known | Where-Object { $apps -notcontains $_ }) } else { @() }
+
+    $sb = New-Object System.Text.StringBuilder
+    [void]$sb.AppendLine('<Configuration>')
+    [void]$sb.AppendLine(('  <Add OfficeClientEdition="{0}" Channel="{1}" MigrateArch="TRUE">' -f $edition, $channel))
+    if ($Office.pidKey) {
+        [void]$sb.AppendLine(('    <Product ID="{0}" PIDKEY="{1}">' -f $productId, $Office.pidKey))
+    }
+    else {
+        [void]$sb.AppendLine(('    <Product ID="{0}">' -f $productId))
+    }
+    foreach ($language in $languages) {
+        [void]$sb.AppendLine(('      <Language ID="{0}" />' -f $language))
+    }
+    foreach ($app in $exclude) {
+        [void]$sb.AppendLine(('      <ExcludeApp ID="{0}" />' -f $app))
+    }
+    [void]$sb.AppendLine('    </Product>')
+    [void]$sb.AppendLine('  </Add>')
+    if ($Office.removeMsi) { [void]$sb.AppendLine('  <RemoveMSI />') }
+    [void]$sb.AppendLine(('  <Updates Enabled="TRUE" Channel="{0}" />' -f $channel))
+    [void]$sb.AppendLine('  <Property Name="SharedComputerLicensing" Value="0" />')
+    [void]$sb.AppendLine('  <Property Name="FORCEAPPSHUTDOWN" Value="TRUE" />')
+    [void]$sb.AppendLine('  <Property Name="PinIconsToTaskbar" Value="FALSE" />')
+    [void]$sb.AppendLine(('  <Display Level="{0}" AcceptEULA="TRUE" />' -f $display))
+    [void]$sb.AppendLine('  <Logging Level="Standard" Path="%ProgramData%\oobe" />')
+    [void]$sb.AppendLine('</Configuration>')
+
+    [IO.File]::WriteAllText($Path, $sb.ToString(), (New-Object Text.UTF8Encoding $false))
+
+    $installed = if ($apps.Count -gt 0) { $apps -join ', ' } else { 'все компоненты' }
+    Write-Host "  конфигурация собрана: $productId, канал $channel, $edition-бит"
+    Write-Host "  ставим: $installed"
+    if ($exclude) { Write-Host "  исключаем: $($exclude -join ', ')" }
+}
+
 function Install-Office {
     param(
         $Office,
@@ -984,7 +1043,11 @@ function Install-Office {
         $config = Join-Path -Path $script:WorkDir -ChildPath 'office-configuration.xml'
         Invoke-WebRequest -Uri $Office.configUri -OutFile $config -UseBasicParsing
     }
-    if (-not $config) { throw 'не найден configuration.xml для Office.' }
+    if (-not $config) {
+        # Готового XML не задали — собираем из полей конфига.
+        $config = Join-Path -Path $script:WorkDir -ChildPath 'office-configuration.xml'
+        New-OfficeConfiguration -Office $Office -Path $config
+    }
 
     Write-Host "  ODT: $setup /configure $config"
     $proc = Start-Process -FilePath $setup -ArgumentList @('/configure', $config) -Wait -PassThru

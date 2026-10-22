@@ -1,0 +1,39 @@
+<!--
+  Office LTSC профессиональный плюс 2024, томовая лицензия.
+  Эталонный файл: ровно это собирает postinstall.ps1 из полей office
+  в postinstall.json, когда configNasPath/configPath/configUri не заданы.
+  Нужен, если хотите править XML руками — тогда укажите путь к нему
+  в office.configNasPath или office.configPath.
+
+  Применяется так: setup.exe /configure configuration-ProPlus2024Volume.xml
+  Справочник: https://learn.microsoft.com/ru-ru/microsoft-365-apps/deploy/office-deployment-tool-configuration-options
+
+  Активация: PIDKEY нужен только для KMS/MAK, при AD-based активации его не
+  указывают. Ключи GVLK: https://learn.microsoft.com/ru-ru/deployoffice/vlactivation/gvlks
+-->
+<Configuration>
+    <Add OfficeClientEdition="64" Channel="PerpetualVL2024" MigrateArch="TRUE">
+        <Product ID="ProPlus2024Volume">
+            <Language ID="ru-ru" />
+            <Language ID="en-us" />
+            <ExcludeApp ID="Access" />
+            <ExcludeApp ID="Bing" />
+            <ExcludeApp ID="Groove" />
+            <ExcludeApp ID="Lync" />
+            <ExcludeApp ID="OneDrive" />
+            <ExcludeApp ID="OneNote" />
+            <ExcludeApp ID="Publisher" />
+            <ExcludeApp ID="Teams" />
+        </Product>
+    </Add>
+
+    <RemoveMSI />
+    <Updates Enabled="TRUE" Channel="PerpetualVL2024" />
+
+    <Property Name="SharedComputerLicensing" Value="0" />
+    <Property Name="FORCEAPPSHUTDOWN" Value="TRUE" />
+    <Property Name="PinIconsToTaskbar" Value="FALSE" />
+
+    <Display Level="None" AcceptEULA="TRUE" />
+    <Logging Level="Standard" Path="%ProgramData%\oobe" />
+</Configuration>

@@ -319,20 +319,54 @@
   ],
   "office": {
     "_comment": [
-      "mode = odt   — Office Deployment Tool + configuration.xml (Office LTSC, тома).",
+      "mode = odt   — Office Deployment Tool: setup.exe /configure <configuration.xml>.",
       "mode = winget — Microsoft 365 Apps из winget (розничная лицензия).",
-      "Выбор редакции и способа активации за вами, поэтому по умолчанию enabled=false.",
-      "setupNasPath/configNasPath — пути внутри раздачи NAS; если пусто, ODT ставится",
-      "через winget (Microsoft.OfficeDeploymentTool), а конфиг берётся из configUri."
+      "",
+      "По умолчанию configuration.xml собирается из полей ниже, править XML",
+      "руками не нужно: меняете channel, apps, languages — и всё.",
+      "Если нужен свой готовый XML, укажите configNasPath, configPath или",
+      "configUri — тогда он используется как есть, а поля ниже игнорируются.",
+      "Примеры готовых файлов лежат в office/.",
+      "",
+      "productId — редакция. ProPlus2024Volume это Office LTSC профессиональный",
+      "            плюс 2024, томовая лицензия.",
+      "channel   — канал обновлений. Для томовых LTSC это PerpetualVL2024",
+      "            (для 2021 — PerpetualVL2021), для подписки обычно",
+      "            MonthlyEnterprise или SemiAnnual.",
+      "apps      — что ставим. Всё остальное из известного списка уходит",
+      "            в ExcludeApp: Access, Bing, Groove, Lync, OneDrive, OneNote,",
+      "            Outlook, PowerPoint, Publisher, Teams, Word, Excel.",
+      "            Пустой список означает «ставить всё».",
+      "pidKey    — ключ продукта. Нужен только для KMS/MAK; при AD-based",
+      "            активации оставьте пустым. Список GVLK:",
+      "            https://learn.microsoft.com/ru-ru/deployoffice/vlactivation/gvlks",
+      "",
+      "setupNasPath — путь к setup.exe из ODT на раздаче. Если пусто, ODT",
+      "               ставится через winget (Microsoft.OfficeDeploymentTool)."
     ],
     "enabled": false,
     "mode": "odt",
     "wingetId": "Microsoft.Office",
+    "productId": "ProPlus2024Volume",
+    "channel": "PerpetualVL2024",
+    "edition": "64",
+    "languages": [
+      "ru-ru",
+      "en-us"
+    ],
+    "apps": [
+      "Outlook",
+      "Word",
+      "Excel",
+      "PowerPoint"
+    ],
+    "pidKey": "",
+    "removeMsi": true,
+    "displayLevel": "None",
     "setupNasPath": "Office/ODT/setup.exe",
-    "configNasPath": "Office/ODT/configuration-ProPlus2021Volume.xml",
-    "setupPath": "",
+    "configNasPath": "",
     "configPath": "",
-    "configUri": "https://raw.githubusercontent.com/gpas45/scripts/main/windows/oobe/office/configuration-ProPlus2021Volume.xml"
+    "configUri": ""
   },
   "registry": [
     {

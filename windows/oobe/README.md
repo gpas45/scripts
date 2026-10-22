@@ -16,7 +16,8 @@
 | `oobe.ps1` | Скачивает `UnattendOOBE.xml`, проверяет его, раскладывает пост-установочные файлы и запускает `sysprep /oobe /reboot /unattend:…`. |
 | `postinstall.ps1` | Пост-установка при первом входе: ПО, правки реестра, системные настройки. Логику не правят — правят `postinstall.json`. |
 | `postinstall.json` | **Единственный файл, который нужно настроить под себя**: адрес NAS, список ПО, правки реестра, системные параметры. |
-| `office/configuration-ProPlus2021Volume.xml` | Конфигурация Office Deployment Tool для Office LTSC Professional Plus 2021 (томовая лицензия). |
+| `office/configuration-ProPlus2024Volume.xml` | Эталонная конфигурация ODT: Office LTSC профессиональный плюс 2024, набор по умолчанию. |
+| `office/configuration-ProPlus2021Volume.xml` | То же для Office LTSC Professional Plus 2021. |
 | `office/configuration-M365Apps.xml` | Конфигурация ODT для Microsoft 365 Apps (подписка). |
 
 ## Сценарий 1: повторный прогон OOBE на уже установленной Windows
@@ -668,16 +669,55 @@ Windows умеет сама доставлять приложения в све�
 
 ## Microsoft Office
 
-По умолчанию `"office": { "enabled": false }` — редакцию и способ активации
-за вас не выберешь. Включается одним флагом:
+Включается в опросе `oobe.ps1` («Ставить Microsoft Office?») или флагом
+`office.enabled` в конфиге.
 
 | `mode` | Что делает |
 |---|---|
-| `odt` | Берёт `setup.exe` из `Office\ODT\` на NAS (или ставит ODT через winget) и выполняет `setup.exe /configure <configuration.xml>`. Для Office LTSC / томовых лицензий. |
+| `odt` | Берёт `setup.exe` из `Office\ODT\` на раздаче (или ставит ODT через winget) и выполняет `setup.exe /configure <configuration.xml>`. Для Office LTSC и томовых лицензий. |
 | `winget` | `winget install Microsoft.Office` — Microsoft 365 Apps, лицензия активируется входом пользователя. |
 
-Конфигурации ODT лежат в `office/`. Параметры: [справочник ODT](https://learn.microsoft.com/ru-ru/microsoft-365-apps/deploy/office-deployment-tool-configuration-options),
+**`configuration.xml` собирается из конфига, править XML руками не нужно.**
+Оси те же, что в [farag2/Install-Office](https://github.com/farag2/Install-Office):
+ветка, канал, компоненты.
+
+```json
+"office": {
+  "enabled": false,
+  "mode": "odt",
+  "productId": "ProPlus2024Volume",
+  "channel": "PerpetualVL2024",
+  "edition": "64",
+  "languages": ["ru-ru", "en-us"],
+  "apps": ["Outlook", "Word", "Excel", "PowerPoint"],
+  "pidKey": ""
+}
+```
+
+| Поле | Значения |
+|---|---|
+| `productId` | `ProPlus2024Volume` — Office LTSC 2024, томовая лицензия; `O365ProPlusRetail` — Microsoft 365 Apps; `ProPlus2021Volume` — LTSC 2021 |
+| `channel` | Для томовых LTSC — `PerpetualVL2024` или `PerpetualVL2021`; для подписки — `Current`, `MonthlyEnterprise`, `SemiAnnual` |
+| `apps` | `Access`, `Bing`, `Excel`, `Groove`, `Lync`, `OneDrive`, `OneNote`, `Outlook`, `PowerPoint`, `Publisher`, `Teams`, `Word`. Пустой список — ставить всё |
+| `pidKey` | Только для KMS/MAK; при AD-based активации оставьте пустым |
+
+ODT принимает не список устанавливаемого, а список исключаемого, поэтому из
+`apps` автоматически вычитается всё остальное. Набор по умолчанию — Outlook,
+Word, Excel, PowerPoint — даёт восемь `ExcludeApp`. Опечатка в имени компонента
+не проходит молча: установка прерывается с перечислением допустимых значений,
+иначе `Wrod` просто означал бы «Word не ставим».
+
+Если нужен свой готовый XML, укажите `configNasPath`, `configPath` или
+`configUri` — он возьмётся как есть, а поля выше будут проигнорированы. Готовые
+примеры лежат в [`office/`](office/), файл для набора по умолчанию —
+[`configuration-ProPlus2024Volume.xml`](office/configuration-ProPlus2024Volume.xml).
+
+Справочник параметров: [ODT](https://learn.microsoft.com/ru-ru/microsoft-365-apps/deploy/office-deployment-tool-configuration-options),
 ключи KMS: [GVLK](https://learn.microsoft.com/ru-ru/deployoffice/vlactivation/gvlks).
+
+> Project и Visio — отдельные продукты ODT (`ProjectPro2024Volume`,
+> `VisioPro2024Volume`), а не компоненты. Через `apps` их не поставить, нужен
+> свой `configuration.xml` со вторым блоком `<Product>`.
 
 ## Учётная запись и пароль
 

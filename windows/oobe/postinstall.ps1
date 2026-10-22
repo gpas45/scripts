@@ -1193,93 +1193,6 @@ function Install-Application {
     throw "нет подходящего источника при source=$source.$detail"
 }
 
-function ConvertTo-WebDavPath {
-    param(
-        [string]$BaseUrl,
-        [string]$RelativePath
-    )
-    # Windows умеет ходить в WebDAV по UNC: \\сервер@SSL\путь, а с нестандартным
-    # портом — \\сервер@SSL@порт\путь. Это позволяет отдать ODT раздачу по
-    # HTTPS, хотя сам он принимает только локальный или UNC-путь.
-    $uri = [uri]$BaseUrl
-    $server = if ($uri.Scheme -eq 'https') { '{0}@SSL' -f $uri.Host } else { $uri.Host }
-    if (-not $uri.IsDefaultPort) { $server = '{0}@{1}' -f $server, $uri.Port }
-
-    $segments = @($uri.AbsolutePath.Trim('/'), $RelativePath.Trim('/')) | Where-Object { $_ }
-    $path = ($segments -join '/') -replace '/', '\'
-    return '\\{0}\{1}' -f $server, $path
-}
-
-function Set-WebClientLimit {
-    # Клиент WebDAV по умолчанию отказывается брать файл больше 50 МБ:
-    # «Размер файла превышает установленное ограничение» (ошибка 223). Для
-    # дистрибутива Office, где stream.x64.<язык>.dat измеряется гигабайтами,
-    # это запрет на всё. Поднимаем до потолка, который принимает сам клиент,
-    # — 4 ГБ (0xFFFFFFFF); файл больше через WebDAV не пройдёт в принципе.
-    $key = 'HKLM:\SYSTEM\CurrentControlSet\Services\WebClient\Parameters'
-    $limit = 4294967295
-    $changed = $false
-
-    if (-not (Test-Path -LiteralPath $key)) {
-        New-Item -Path $key -Force | Out-Null
-    }
-    # FileAttributesLimitInBytes — предел на объём свойств при листинге
-    # каталога; на больших папках без него листинг обрывается.
-    foreach ($name in @('FileSizeLimitInBytes', 'FileAttributesLimitInBytes')) {
-        $current = (Get-ItemProperty -LiteralPath $key -Name $name -ErrorAction SilentlyContinue).$name
-        if ($current -eq $limit) { continue }
-        try {
-            New-ItemProperty -LiteralPath $key -Name $name -PropertyType DWord -Value $limit -Force | Out-Null
-            $changed = $true
-        }
-        catch {
-            Write-Warning "  не удалось поднять $name`: $($_.Exception.Message)"
-        }
-    }
-    return $changed
-}
-
-function Connect-WebDavPath {
-    param(
-        [string]$Path,
-        $Nas
-    )
-    # Ограничения читаются службой при запуске, поэтому правим их до него.
-    $limitChanged = Set-WebClientLimit
-
-    # На клиентских редакциях служба WebClient запускается по требованию,
-    # и без неё UNC-путь к WebDAV просто не резолвится.
-    try {
-        $service = Get-Service -Name 'WebClient' -ErrorAction Stop
-        if ($service.Status -ne 'Running') {
-            Start-Service -Name 'WebClient' -ErrorAction Stop
-            Write-Host '  служба WebClient запущена'
-        }
-        elseif ($limitChanged) {
-            # Служба уже работала со старым пределом — иначе он и останется.
-            Write-Host '  перезапускаю WebClient: поднят предел на размер файла'
-            Restart-Service -Name 'WebClient' -Force -ErrorAction Stop
-        }
-    }
-    catch {
-        Write-Warning "  не удалось запустить службу WebClient: $($_.Exception.Message)"
-        return $false
-    }
-
-    $account = if ($NasUser) { $NasUser } else { $Nas.user }
-    $secret = Get-NasPassword -Nas $Nas
-    if ($account -and $secret) {
-        # Подключаемся к корню ресурса: учётные данные общие на всю раздачу.
-        $parts = @($Path.TrimStart('\') -split '\\' | Where-Object { $_ })
-        $root = '\\{0}\{1}' -f $parts[0], $parts[1]
-        & net.exe use $root $secret /user:$account 2>&1 | Out-Null
-    }
-
-    if (Test-Path -LiteralPath $Path) { return $true }
-    Write-Warning "  WebDAV-путь $Path недоступен."
-    return $false
-}
-
 function Get-OfficeSourceInfo {
     param([string]$Path)
 
@@ -1618,6 +1531,45 @@ function New-OfficeConfiguration {
     }
 }
 
+function Disable-OfficeRegionBlock {
+    # Microsoft не отдаёт дистрибутив Office в российский и белорусский
+    # регионы. Тот же приём, что в Download-Office.ps1: регион временно
+    # польский, плюс чистка ключей Experiment, где оседает то же ограничение.
+    # Возвращает прежний GeoId либо $null, если менять ничего не пришлось.
+    $previous = $null
+    try {
+        $current = (Get-WinHomeLocation).GeoId
+        # 203 — Россия, 29 — Беларусь, 191 — Польша.
+        if ($current -in @(203, 29)) {
+            $previous = $current
+            Set-WinHomeLocation -GeoId 191
+            Write-Host "  регион временно изменён на польский (был $previous) — иначе Microsoft не отдаёт дистрибутив"
+        }
+    }
+    catch {
+        Write-Warning "  не удалось прочитать или сменить регион: $($_.Exception.Message)"
+    }
+
+    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue -Path @(
+        'HKCU:\SOFTWARE\Microsoft\Office\16.0\Common\Experiment',
+        'HKCU:\SOFTWARE\Microsoft\Office\16.0\Common\ExperimentConfigs',
+        'HKCU:\SOFTWARE\Microsoft\Office\16.0\Common\ExperimentEcs'
+    )
+    return $previous
+}
+
+function Restore-OfficeRegion {
+    param($GeoId)
+    if (-not $GeoId) { return }
+    try {
+        Set-WinHomeLocation -GeoId $GeoId
+        Write-Host "  регион возвращён ($GeoId)"
+    }
+    catch {
+        Write-Warning "ВЕРНИТЕ РЕГИОН ВРУЧНУЮ ($GeoId): $($_.Exception.Message)"
+    }
+}
+
 function Install-Office {
     param(
         $Office,
@@ -1628,6 +1580,25 @@ function Install-Office {
         return
     }
 
+    # Блокировку снимаем на весь шаг: она мешает и скачать ODT, и дать ему
+    # забрать дистрибутив. Регион возвращается в любом случае — в том числе
+    # если установка упала или её прервали.
+    $bypass = $true
+    if ($Office.PSObject.Properties['bypassRegionBlock']) { $bypass = [bool]$Office.bypassRegionBlock }
+    $previousGeoId = if ($bypass) { Disable-OfficeRegionBlock } else { $null }
+    try {
+        Invoke-OfficeSetup -Office $Office -Nas $Nas
+    }
+    finally {
+        Restore-OfficeRegion -GeoId $previousGeoId
+    }
+}
+
+function Invoke-OfficeSetup {
+    param(
+        $Office,
+        $Nas
+    )
     $nasReady = ($Nas -and $Nas.enabled)
 
     $setup = $null
@@ -1673,23 +1644,17 @@ function Install-Office {
     }
     if (-not $config) {
         # Готового XML не задали — собираем из полей конфига.
-        if (-not $Office.sourcePath -and $Office.sourceNasPath -and $nasReady) {
-            if ($Nas.type -eq 'smb') {
-                $resolved = Join-Path -Path $script:NasSharePath -ChildPath ($Office.sourceNasPath -replace '/', '\')
-                $Office | Add-Member -NotePropertyName sourcePath -NotePropertyValue $resolved -Force
-            }
-            else {
-                # ODT принимает локальный или UNC-путь, но не HTTP-адрес,
-                # поэтому раздачу по HTTPS отдаём ему через WebDAV-UNC.
-                $webdav = ConvertTo-WebDavPath -BaseUrl $Nas.baseUrl -RelativePath $Office.sourceNasPath
-                Write-Host "  источник по WebDAV: $webdav"
-                if (Connect-WebDavPath -Path $webdav -Nas $Nas) {
-                    $Office | Add-Member -NotePropertyName sourcePath -NotePropertyValue $webdav -Force
-                }
-                else {
-                    Write-Warning '  подключить раздачу по WebDAV не удалось — Office пойдёт на CDN Microsoft.'
-                }
-            }
+        # ODT принимает локальный или UNC-путь, но не HTTP-адрес, поэтому
+        # раздачу как источник Office можно использовать только по SMB.
+        # В остальных случаях ODT качает дистрибутив сам, с серверов
+        # Microsoft, — ровно как Download-Office.ps1, с тем же обходом
+        # региональной блокировки.
+        if (-not $Office.sourcePath -and $Office.sourceNasPath -and $nasReady -and $Nas.type -eq 'smb') {
+            $resolved = Join-Path -Path $script:NasSharePath -ChildPath ($Office.sourceNasPath -replace '/', '\')
+            $Office | Add-Member -NotePropertyName sourcePath -NotePropertyValue $resolved -Force
+        }
+        elseif (-not $Office.sourcePath -and $Office.sourceNasPath) {
+            Write-Host '  раздача по HTTPS источником для ODT быть не может — качаю дистрибутив от Microsoft.'
         }
         $config = Join-Path -Path $script:WorkDir -ChildPath 'office-configuration.xml'
         New-OfficeConfiguration -Office $Office -Path $config

@@ -104,6 +104,13 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# Лог этого этапа: без него разбирать потом нечего — postinstall.ps1 свой лог
+# ведёт, а здесь до сих пор не было никакого.
+$script:OobeLog = Join-Path -Path $env:TEMP -ChildPath 'oobe.log'
+$script:TranscriptStopped = $false
+try { Start-Transcript -Path $script:OobeLog -Append | Out-Null }
+catch { Write-Warning 'Не удалось начать запись лога.' }
+
 # --- Экран плана установки ---------------------------------------------------
 
 function Read-Secret {
@@ -665,6 +672,10 @@ if (-not $sysprep) {
 if (-not $SkipPostInstall) {
     $windowsDrive = [IO.Path]::GetPathRoot($sysprep)
     $oobeDir = Join-Path -Path $windowsDrive -ChildPath 'ProgramData\oobe'
+    $staged = Join-Path -Path $oobeDir -ChildPath 'postinstall.json'
+
+    # Каждый шаг со своим разбором ошибок: иначе сбой записи пароля выглядел бы
+    # как «не удалось подготовить postinstall», хотя скачалось всё.
     try {
         New-Item -ItemType Directory -Force -Path $oobeDir | Out-Null
         foreach ($name in @('postinstall.ps1', 'postinstall.json')) {
@@ -673,41 +684,84 @@ if (-not $SkipPostInstall) {
                 -OutFile $target -UseBasicParsing
             Write-Host "  положил $target"
         }
+    }
+    catch {
+        Write-Warning "Не удалось скачать postinstall.*: $($_.Exception.Message)"
+        Write-Warning 'При первом входе скрипт будет взят из интернета (см. FirstLogonCommands).'
+    }
 
-        # Экран плана: человек присутствует только здесь, поэтому все вопросы
-        # задаются на этом шаге. Результат пишется в postinstall.override.json
-        # рядом с конфигом — postinstall.ps1 подхватит его при первом входе,
-        # а сам postinstall.json править не нужно.
-        $staged = Join-Path -Path $oobeDir -ChildPath 'postinstall.json'
-        $plan = Show-InstallPlan -ConfigPath $staged
+    # Экран плана: человек присутствует только здесь, поэтому все вопросы
+    # задаются на этом шаге. Результат пишется в postinstall.override.json
+    # рядом с конфигом — postinstall.ps1 подхватит его при первом входе,
+    # а сам postinstall.json править не нужно.
+    $plan = Show-InstallPlan -ConfigPath $staged
 
-        if ($plan.Cancelled) {
-            Write-Host 'Отменено — sysprep не запускался, система осталась в OOBE.'
-            exit 0
+    if ($plan.Cancelled) {
+        Write-Host 'Отменено — sysprep не запускался, система осталась в OOBE.'
+        if (-not $script:TranscriptStopped) {
+            try { Stop-Transcript | Out-Null } catch { Write-Verbose 'Transcript уже остановлен.' }
         }
+        exit 0
+    }
 
-        $override = @{}
-        if ($plan.Nas.Count -gt 0) { $override['nas'] = $plan.Nas }
-        if ($plan.Office) { $override['office'] = $plan.Office }
-        if ($plan.Include) { $override['include'] = $plan.Include }
+    $override = @{}
+    if ($plan.Nas.Count -gt 0) { $override['nas'] = $plan.Nas }
+    if ($plan.Office) { $override['office'] = $plan.Office }
+    if ($plan.Include) { $override['include'] = $plan.Include }
 
-        if ($override.Count -gt 0) {
-            $overrideFile = Join-Path -Path $oobeDir -ChildPath 'postinstall.override.json'
+    if ($override.Count -gt 0) {
+        $overrideFile = Join-Path -Path $oobeDir -ChildPath 'postinstall.override.json'
+        try {
             $override | ConvertTo-Json -Depth 4 |
                 Set-Content -LiteralPath $overrideFile -Encoding UTF8
             Write-Host "  положил $overrideFile"
         }
-
-        if ($plan.Password) {
-            $credFile = Join-Path -Path $oobeDir -ChildPath 'nas.cred'
-            [IO.File]::WriteAllText($credFile, (ConvertTo-PlainText -Secure $plan.Password), (New-Object Text.UTF8Encoding $false))
-            & icacls.exe $credFile /inheritance:r /grant:r 'SYSTEM:(R)' '*S-1-5-32-544:(R)' | Out-Null
-            Write-Host "  положил $credFile (доступ: SYSTEM и администраторы)"
+        catch {
+            Write-Warning "Не удалось записать $overrideFile — $($_.Exception.Message)"
+            Write-Warning 'Выбор из опроса не применится: постустановка пойдёт по значениям из конфига.'
         }
     }
+
+    if ($plan.Password) {
+        $credFile = Join-Path -Path $oobeDir -ChildPath 'nas.cred'
+        try {
+            # Файл с прошлого прогона лежит с урезанными правами, поэтому
+            # сначала убираем его: иначе перезапись падает с «отказано
+            # в доступе» — ровно это и ломало повторные запуски.
+            Remove-Item -LiteralPath $credFile -Force -ErrorAction SilentlyContinue
+
+            [IO.File]::WriteAllText($credFile, (ConvertTo-PlainText -Secure $plan.Password),
+                (New-Object Text.UTF8Encoding $false))
+
+            # Полный доступ, а не только чтение: смысл в том, чтобы закрыть
+            # файл от обычных пользователей, а не от SYSTEM и администраторов.
+            # Имена учётных записей локализованы (SYSTEM на русской Windows —
+            # «система»), поэтому только SID: S-1-5-18 и S-1-5-32-544.
+            # Вывод icacls перехватываем: в Windows PowerShell 5.1 его
+            # сообщение в stderr при ErrorActionPreference = Stop обрывает шаг.
+            $icacls = (& icacls.exe $credFile /inheritance:r /grant:r '*S-1-5-18:(F)' '*S-1-5-32-544:(F)' 2>&1 | Out-String).Trim()
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "  положил $credFile (доступ: SYSTEM и администраторы)"
+            }
+            else {
+                Write-Warning "Права на $credFile не ограничены (icacls код $LASTEXITCODE): $icacls"
+                Write-Warning 'Файл с паролем доступен всем пользователям машины — поправьте вручную.'
+            }
+        }
+        catch {
+            Write-Warning "Не удалось сохранить пароль в $credFile — $($_.Exception.Message)"
+            Write-Warning 'При первом входе раздача будет недоступна: пароль взять неоткуда.'
+        }
+    }
+
+    # Лог этого этапа кладём рядом, чтобы было что разбирать после перезагрузки.
+    try {
+        Stop-Transcript | Out-Null
+        Copy-Item -LiteralPath $script:OobeLog -Destination (Join-Path -Path $oobeDir -ChildPath 'oobe.log') -Force
+        $script:TranscriptStopped = $true
+    }
     catch {
-        Write-Warning "Не удалось подготовить postinstall.*: $($_.Exception.Message)"
-        Write-Warning 'При первом входе скрипт будет скачан из интернета (см. FirstLogonCommands).'
+        Write-Verbose 'Лог скопировать не удалось.'
     }
 }
 
@@ -718,6 +772,11 @@ if ($account) {
     Write-Host "Будет создана локальная учётная запись администратора: $account" -ForegroundColor DarkGreen
     Write-Host 'Смените пароль сразу после первого входа.' -ForegroundColor DarkYellow
 }
+
+if (-not $script:TranscriptStopped) {
+    try { Stop-Transcript | Out-Null } catch { Write-Verbose 'Transcript уже остановлен.' }
+}
+Write-Host "Лог этого этапа: $script:OobeLog"
 
 Write-Host "Запускаю $sysprep /oobe /reboot /unattend:$Path"
 & $sysprep '/oobe' '/reboot' "/unattend:$Path"

@@ -985,6 +985,7 @@ C:\Windows\System32\Sysprep\sysprep.exe /audit /reboot
 
 | Что | Где |
 |---|---|
+| Лог этапа OOBE | `C:\ProgramData\oobe\oobe.log` (во время работы — `%TEMP%\oobe.log`) |
 | Лог пост-установки | `C:\ProgramData\oobe\postinstall.log` |
 | Лог ODT (Office) | `C:\ProgramData\oobe\*.log` |
 | Применённый файл ответов | `C:\Windows\Panther\unattend.xml` |

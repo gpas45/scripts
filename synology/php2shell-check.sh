@@ -102,12 +102,23 @@ fixed_patch_for() {
     esac
 }
 
-# Статус пакета в DSM: started / stopped / неизвестно
+# Статус пакета в DSM: running / stopped / неизвестно
+# DSM 7.4+ отдаёт JSON, более ранние версии — одно слово; разбираем оба случая.
 package_status() {
-    local pkg=$1 status
-    if command -v /usr/syno/bin/synopkg >/dev/null 2>&1; then
-        status=$(/usr/syno/bin/synopkg status "$pkg" 2>/dev/null | tr -d '[:space:]')
+    local pkg=$1 raw='' status=''
+    if [ -x /usr/syno/bin/synopkg ]; then
+        raw=$(/usr/syno/bin/synopkg status "$pkg" 2>/dev/null)
     fi
+    case "$raw" in
+        '{'*)
+            # {"aspect":{"active":{"status":"running"},...,"status":"running"}}
+            # Берём последнее поле — статус самого пакета, а не вложенного аспекта.
+            status=$(echo "$raw" | grep -o '"status":"[^"]*"' | tail -1 | cut -d'"' -f4)
+            ;;
+        *)
+            status=$(echo "$raw" | tr -d '[:space:]')
+            ;;
+    esac
     echo "${status:-неизвестно}"
 }
 
@@ -193,7 +204,7 @@ check_upload_progress() {
 
     # find ... -exec grep: имена файлов не проходят через переменную,
     # поэтому пробелы в путях не ломают разбор.
-    local ini_count hits found=0 line
+    local ini_count hits found=0 web_found=0 line
     ini_count=$(find /usr/local/etc /etc/php* /var/packages/PHP*/target \
         -maxdepth 5 -name '*.ini' -type f 2>/dev/null | wc -l)
 
@@ -208,16 +219,32 @@ check_upload_progress() {
         -maxdepth 5 -name '*.ini' -type f \
         -exec grep -Hn '^[[:space:]]*session\.upload_progress\.enabled' {} + 2>/dev/null)
 
+    # Путь атаки — только веб-SAPI (FPM). Интерпретатор CLI по сети недоступен,
+    # поэтому его конфиги помечаем отдельно, чтобы не выдавать их за значимые.
     while IFS= read -r line; do
         [ -n "$line" ] || continue
         found=1
-        printf '  %s\n' "$line"
+        case "$line" in
+            */cli/*)
+                printf '  %s  %s[CLI — не сетевой путь атаки]%s\n' "$line" "$C_YELLOW" "$C_OFF"
+                ;;
+            *)
+                web_found=1
+                printf '  %s\n' "$line"
+                ;;
+        esac
     done <<< "$hits"
 
     if [ "$found" -eq 0 ]; then
         printf '  %sЯвно не задано — значит включено%s (значение PHP по умолчанию: On).\n' \
             "$C_YELLOW" "$C_OFF"
         printf '  Это оставляет открытым подтверждённый путь CVE-2026-109619.\n'
+        return
+    fi
+
+    if [ "$web_found" -eq 0 ]; then
+        printf '  Настройка найдена только в конфигах CLI — веб-профилей (FPM) с ней нет.\n'
+        printf '  Для веб-SAPI действует значение по умолчанию (On).\n'
     fi
 }
 

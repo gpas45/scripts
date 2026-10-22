@@ -40,16 +40,16 @@ powershell -ExecutionPolicy Bypass -File $env:TEMP\oobe.ps1
   1 — HTTPS, из интернета через обратный прокси
   2 — SMB, внутри локальной сети напрямую с NAS
   Подключение [1]:
-  Адрес раздачи [https://oobe.dioservice.ru/deploy]:
+  Адрес раздачи [https://oobe.dioservice.ru/Deploy]:
   Учётная запись [deploy]:
   Пароль: ********
   Проверяю доступ…
-  Доступ есть: HTTP 200, https://oobe.dioservice.ru/deploy/7-Zip/7z-x64.msi
+  Доступ есть: HTTP 200, https://oobe.dioservice.ru/Deploy/7-Zip/7z-x64.msi
 
   Ставить Microsoft Office, режим odt? [y/N]:
 
 ================ План установки ================
-  Источник ПО      : https://oobe.dioservice.ru/deploy (HTTP)
+  Источник ПО      : https://oobe.dioservice.ru/Deploy (HTTP)
   Учётная запись   : deploy
   Программы        : 10
       - 7-Zip
@@ -87,7 +87,7 @@ powershell -ExecutionPolicy Bypass -File $env:TEMP\oobe.ps1
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File $env:TEMP\oobe.ps1 -NoPrompt `
-    -NasBaseUrl https://oobe.dioservice.ru/deploy -NasUser deploy -NasPassword 'пароль'
+    -NasBaseUrl https://oobe.dioservice.ru/Deploy -NasUser deploy -NasPassword 'пароль'
 ```
 
 ### Проверка доступа к раздаче
@@ -127,7 +127,7 @@ powershell -ExecutionPolicy Bypass -File $env:TEMP\oobe.ps1 -NoPrompt `
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File $env:TEMP\oobe.ps1 -NoPrompt `
-    -NasBaseUrl https://oobe.dioservice.ru/deploy -NasUser deploy -NasPassword 'пароль'
+    -NasBaseUrl https://oobe.dioservice.ru/Deploy -NasUser deploy -NasPassword 'пароль'
 ```
 
 Короткий вариант «в одну команду» из статьи-источника тоже работает, но
@@ -189,7 +189,7 @@ Add-AppxProvisionedPackage -Online `
 Ожидаемая раскладка раздачи (пути задаются в `software[].nasPath`):
 
 ```
-https://oobe.dioservice.ru/deploy/
+https://oobe.dioservice.ru/Deploy/
 ├─ 7-Zip\7z-x64.msi
 ├─ WinRAR\
 │  ├─ winrar-x64.exe
@@ -222,7 +222,7 @@ https://oobe.dioservice.ru/deploy/
 ### Вариант по умолчанию: HTTPS (`"type": "http"`)
 
 Установка идёт за пределами локальной сети, поэтому по умолчанию дистрибутивы
-забираются по HTTPS с `https://oobe.dioservice.ru/deploy`.
+забираются по HTTPS с `https://oobe.dioservice.ru/Deploy`.
 
 Имя у HTTPS-раздачи отдельное, и это намеренно: `nas.dioservice.ru` остаётся за
 интерфейсом DSM и SMB (внутри сети оно резолвится прямо в NAS), а
@@ -237,11 +237,13 @@ https://oobe.dioservice.ru/deploy/
 На Synology:
 
 1. **Центр пакетов** → установите **WebDAV Server**, включите в нём HTTPS
-   (порт 5006). Общая папка `deploy` отдаётся по адресу `/deploy/...` — имя
+   (порт 5006). Общая папка `Deploy` отдаётся по адресу `/Deploy/...` — имя
    папки и есть первый сегмент пути, поэтому никаких переписываний пути
-   в Traefik не нужно.
+   в Traefik не нужно. Регистр имеет значение: Apache, на котором работает
+   WebDAV Server, сравнивает путь посимвольно, и `PathPrefix` в Traefik тоже.
+   Папка `Deploy` по адресу `/deploy` даст 404.
 2. **Панель управления → Пользователь и группа** → учётная запись `deploy`:
-   на вкладке **Разрешения** папка `deploy` только на чтение, остальные — нет
+   на вкладке **Разрешения** папка `Deploy` только на чтение, остальные — нет
    доступа; на вкладке **Приложения** разрешены только WebDAV и, если
    разворачиваете ещё и изнутри сети, SMB. Вход в DSM запретите, 2FA не
    включайте — с ней WebDAV не работает.
@@ -262,7 +264,7 @@ https://oobe.dioservice.ru/deploy/
 http:
   routers:
     oobe-deploy:
-      rule: "Host(`oobe.dioservice.ru`) && PathPrefix(`/deploy`)"
+      rule: "Host(`oobe.dioservice.ru`) && PathPrefix(`/Deploy`)"
       entryPoints:
         - websecure
       service: nas-webdav
@@ -302,7 +304,7 @@ DSM — Traefik пробрасывает заголовок `Authorization` да
 Для развёртывания внутри сети или через VPN. Поменяйте `nas.type` на `smb` —
 путь берётся из `nas.share`.
 
-На NAS: **Панель управления → Общая папка** → папка `deploy`, и
+На NAS: **Панель управления → Общая папка** → папка `Deploy`, и
 **Пользователь и группа** → учётная запись `deploy` с правом **только на чтение**.
 Пароль передаётся так же, как для HTTPS.
 
@@ -329,7 +331,7 @@ postinstall.json  ->  postinstall.override.json  ->  ключи командно
 
 ```json
 {
-  "nas": { "baseUrl": "https://backup.dioservice.ru/deploy", "user": "deploy" },
+  "nas": { "baseUrl": "https://backup.dioservice.ru/Deploy", "user": "deploy" },
   "include": ["7-Zip", "Notepad++", "Google Chrome"]
 }
 ```

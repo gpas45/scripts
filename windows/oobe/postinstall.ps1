@@ -304,6 +304,32 @@ function Wait-Network {
 
 # --- NAS ---------------------------------------------------------------------
 
+function Unprotect-Secret {
+    param([string]$Value)
+
+    $text = $Value.Trim()
+    if (-not $text.StartsWith('DPAPI:')) {
+        # Файл мог положить человек руками — тогда он в открытом виде, и об
+        # этом надо сказать, а не молча им пользоваться.
+        Write-Warning 'Пароль в nas.cred лежит в открытом виде. Его кладёт зашифрованным oobe.ps1; если файл писали руками, после прогона его лучше удалить.'
+        return $text
+    }
+
+    Add-Type -AssemblyName System.Security -ErrorAction SilentlyContinue
+    $bytes = [Convert]::FromBase64String($text.Substring(6))
+    try {
+        $plain = [Security.Cryptography.ProtectedData]::Unprotect(
+            $bytes, $null, [Security.Cryptography.DataProtectionScope]::LocalMachine)
+    }
+    catch {
+        # Ключ DPAPI машинный: файл, принесённый с другой машины или
+        # переживший sysprep /generalize, не расшифруется здесь никогда.
+        throw "пароль из nas.cred не расшифровывается на этой машине ($($_.Exception.Message)). Файл с паролем от другой машины не подходит — запустите oobe.ps1 заново или задайте -NasPassword."
+    }
+    try { return [Text.Encoding]::UTF8.GetString($plain) }
+    finally { [Array]::Clear($plain, 0, $plain.Length) }
+}
+
 function Get-NasPassword {
     param($Nas)
     if ($NasPassword) { return $NasPassword }
@@ -320,7 +346,7 @@ function Get-NasPassword {
         }
     }
     if (Test-Path -LiteralPath $file) {
-        return (Get-Content -LiteralPath $file -Raw).Trim()
+        return (Unprotect-Secret -Value (Get-Content -LiteralPath $file -Raw))
     }
     Write-Warning "Файл с паролем NAS не найден: $($Nas.passwordFile)"
     return $null
@@ -932,6 +958,59 @@ function Copy-ApplicationConfig {
     }
 }
 
+function Test-JsonFile {
+    param([string]$Path)
+
+    # Qt (а значит и Aspia) читает JSON без поблажек: UTF-8 BOM в начале файла
+    # для него уже синтаксическая ошибка, и наружу это выходит одним лишь
+    # кодом возврата. Поэтому разбираем файл сами и переписываем без BOM.
+    $text = [IO.File]::ReadAllText($Path)
+    $text = $text -replace '^\uFEFF'
+    try {
+        $null = $text | ConvertFrom-Json
+    }
+    catch {
+        throw "файл $Path не разбирается как JSON: $($_.Exception.Message)"
+    }
+    [IO.File]::WriteAllText($Path, $text, (New-Object Text.UTF8Encoding $false))
+}
+
+function Get-ServiceState {
+    param([string]$Name)
+    $service = Get-Service -Name $Name -ErrorAction SilentlyContinue
+    if (-not $service) { return $null }
+    return $service.Status
+}
+
+function Get-LogExcerpt {
+    param(
+        [string]$Pattern,
+        [datetime]$Since,
+        [int]$Lines = 15
+    )
+    # Pattern — маска вида %TEMP%\aspia\aspia_host-*.log: программы кладут
+    # свои логи где им удобно, а путь к ним это такие же данные, как всё
+    # остальное в postinstall.json.
+    $expanded = [Environment]::ExpandEnvironmentVariables($Pattern)
+    $directory = Split-Path -Parent $expanded
+    $mask = Split-Path -Leaf $expanded
+    if (-not (Test-Path -LiteralPath $directory)) { return $null }
+
+    $log = Get-ChildItem -LiteralPath $directory -Filter $mask -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.LastWriteTime -ge $Since.AddMinutes(-2) } |
+        Sort-Object LastWriteTime -Descending |
+        Select-Object -First 1
+    if (-not $log) { return $null }
+
+    $content = @(Get-Content -LiteralPath $log.FullName -ErrorAction SilentlyContinue)
+    $interesting = @($content | Where-Object { $_ -match 'ERROR|FATAL|Unable|Failed|failed|not exist|damaged' })
+    if (-not $interesting) { $interesting = $content }
+    return [pscustomobject]@{
+        Path  = $log.FullName
+        Lines = @($interesting | Select-Object -Last $Lines)
+    }
+}
+
 function Invoke-PostInstallStep {
     param(
         $Item,
@@ -959,6 +1038,9 @@ function Invoke-PostInstallStep {
         if (-not $file) {
             throw "шаг после установки: на источнике нет файла $($step.nasPath)."
         }
+        if ($step.PSObject.Properties['validateJson'] -and $step.validateJson) {
+            Test-JsonFile -Path $file
+        }
         # Обычная подстановка, а не -replace: в пути есть обратные слеши.
         $arguments = $arguments.Replace('{file}', $file)
     }
@@ -970,20 +1052,58 @@ function Invoke-PostInstallStep {
         300
     }
 
-    Write-Host "  после установки: $executable $arguments"
-    $proc = Start-Process -FilePath $executable -ArgumentList $arguments -PassThru
-    $null = $proc.Handle
-    if (-not $proc.WaitForExit($timeout * 1000)) {
-        try { $proc.Kill() } catch { Write-Warning '  не удалось снять зависший процесс.' }
-        throw "шаг после установки не завершился за $timeout с и был прерван."
+    # Служба держит свою базу открытой, и запись в неё со стороны обычно
+    # кончается ничем. Перезапуск нужен и сам по себе: новые настройки
+    # подхватываются только при старте.
+    $serviceName = if ($step.PSObject.Properties['stopService']) { $step.stopService } else { $null }
+    $serviceWasRunning = $false
+    if ($serviceName) {
+        $state = Get-ServiceState -Name $serviceName
+        if ($null -eq $state) {
+            Write-Host "  служба $serviceName не найдена — останавливать нечего."
+        }
+        elseif ($state -eq 'Running') {
+            Write-Host "  останавливаю службу $serviceName на время шага"
+            Stop-Service -Name $serviceName -Force -ErrorAction Stop
+            $serviceWasRunning = $true
+        }
     }
-    $proc.WaitForExit()
-    $allowed = @(0)
-    if ($step.PSObject.Properties['successCodes'] -and $step.successCodes) {
-        $allowed += @($step.successCodes | ForEach-Object { [int]$_ })
+
+    try {
+        Write-Host "  после установки: $executable $arguments"
+        $started = Get-Date
+        $proc = Start-Process -FilePath $executable -ArgumentList $arguments -PassThru
+        $null = $proc.Handle
+        if (-not $proc.WaitForExit($timeout * 1000)) {
+            try { $proc.Kill() } catch { Write-Warning '  не удалось снять зависший процесс.' }
+            throw "шаг после установки не завершился за $timeout с и был прерван."
+        }
+        $proc.WaitForExit()
+
+        $allowed = @(0)
+        if ($step.PSObject.Properties['successCodes'] -and $step.successCodes) {
+            $allowed += @($step.successCodes | ForEach-Object { [int]$_ })
+        }
+        if ($allowed -contains $proc.ExitCode) { return }
+
+        # Код возврата у таких шагов обычно просто 1 — причина остаётся в
+        # собственном логе программы, и без него разбираться не с чем.
+        $hint = ''
+        if ($step.PSObject.Properties['logGlob'] -and $step.logGlob) {
+            $excerpt = Get-LogExcerpt -Pattern $step.logGlob -Since $started
+            if ($excerpt) {
+                Write-Warning "  лог программы: $($excerpt.Path)"
+                foreach ($line in $excerpt.Lines) { Write-Host "    $line" }
+                $hint = " Подробности в $($excerpt.Path) (ключевые строки выше в логе)."
+            }
+        }
+        throw "шаг после установки вернул код $($proc.ExitCode).$hint"
     }
-    if ($allowed -notcontains $proc.ExitCode) {
-        throw "шаг после установки вернул код $($proc.ExitCode)."
+    finally {
+        if ($serviceWasRunning) {
+            Write-Host "  запускаю службу $serviceName обратно"
+            Start-Service -Name $serviceName -ErrorAction SilentlyContinue
+        }
     }
 }
 
@@ -1128,7 +1248,18 @@ function Get-OfficeSourceInfo {
     if ([string]::IsNullOrWhiteSpace($Path)) { return $info }
 
     $data = Join-Path -Path $Path -ChildPath 'Office\Data'
-    if (-not (Test-Path -LiteralPath $data)) { return $info }
+    if (-not (Test-Path -LiteralPath $data)) {
+        # Дистрибутив нередко оказывается на уровень-другой глубже: распаковали
+        # архив, положили рядом с setup.exe, выкачали в подпапку с именем
+        # редакции. Ищем каталог Data внутри каталога Office — ODT всё равно
+        # нужен именно его дед.
+        $found = Get-ChildItem -LiteralPath $Path -Directory -Recurse -Depth 3 -Filter 'Data' -ErrorAction SilentlyContinue |
+            Where-Object { (Split-Path -Leaf (Split-Path -Parent $_.FullName)) -eq 'Office' } |
+            Select-Object -First 1
+        if (-not $found) { return $info }
+        $data = $found.FullName
+        $info.Path = Split-Path -Parent (Split-Path -Parent $data)
+    }
     $info.DataPath = $data
 
     $info.Versions = @(
@@ -1167,9 +1298,17 @@ function Test-OfficeSource {
     # сразу видно, чего именно не хватает на раздаче.
     $info = Get-OfficeSourceInfo -Path $Path
     if (-not $info.DataPath) {
-        throw ("в источнике $Path нет каталога Office\Data. " +
+        $inside = @(Get-ChildItem -LiteralPath $Path -ErrorAction SilentlyContinue |
+            Select-Object -First 10 -ExpandProperty Name)
+        $shown = if ($inside) { "Внутри лежит: $($inside -join ', ')." } else { 'Папка пуста.' }
+        throw ("в источнике $Path нет каталога Office\Data. $shown " +
             'Положите туда дистрибутив, выкачанный Download-Office.ps1 ' +
             '(setup.exe /download), а не установочные файлы как есть.')
+    }
+    if ($info.Path -ne $Path) {
+        # Нашли дистрибутив глубже — ODT должен получить именно этот уровень.
+        Write-Host "  дистрибутив найден глубже: $($info.Path)"
+        $Office | Add-Member -NotePropertyName sourcePath -NotePropertyValue $info.Path -Force
     }
     if (-not $info.Versions) {
         throw "в $($info.DataPath) нет папки сборки вида 16.0.17932.20306 — загрузка дистрибутива не завершена."

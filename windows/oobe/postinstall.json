@@ -353,6 +353,9 @@
         "nasPath": "Aspia/aspia-host-config.json",
         "executable": "%ProgramFiles%\\Aspia\\Host\\aspia_host.exe",
         "arguments": "--import \"{file}\" --silent",
+        "validateJson": true,
+        "stopService": "aspia-host-service",
+        "logGlob": "%TEMP%\\aspia\\aspia_host-*.log",
         "timeoutSeconds": 180,
         "successCodes": []
       },
@@ -369,7 +372,17 @@
         "Файл aspia-host-config.json кладётся на NAS рядом с дистрибутивом.",
         "executable: если путь не существует, исполняемый файл ищется по имени",
         "в Program Files — у разных сборок каталог отличается.",
-        "{file} в arguments заменяется на путь к скачанному конфигу."
+        "{file} в arguments заменяется на путь к скачанному конфигу.",
+        "",
+        "validateJson — разобрать файл перед передачей и переписать без BOM:",
+        "               Qt считает BOM синтаксической ошибкой, импорт выходит",
+        "               с кодом 1 и ничего не объясняет, а BOM ставит Блокнот.",
+        "stopService  — остановить службу на время шага и вернуть обратно.",
+        "               Импорт пишет в базу host.db3, которую служба держит",
+        "               открытой; да и новые настройки подхватываются только",
+        "               при старте службы.",
+        "logGlob      — где искать лог программы, если шаг вернул не ноль.",
+        "               Aspia кладёт его в %TEMP%\\aspia."
       ]
     },
     {

@@ -65,9 +65,9 @@
 .PARAMETER NasPassword
     Учётные данные NAS: для SMB — подключение к папке, для HTTPS — базовая
     аутентификация. Пароль сохраняется в
-    <системный диск>\ProgramData\oobe\nas.cred с правами только для SYSTEM и
-    администраторов, чтобы postinstall.ps1 смог им воспользоваться при первом
-    входе.
+    <системный диск>\ProgramData\oobe\nas.cred, зашифрованным DPAPI в машинной
+    области и с правами только для SYSTEM и администраторов, чтобы
+    postinstall.ps1 смог им воспользоваться при первом входе.
 
 .PARAMETER NoPrompt
     Не показывать экран плана и ничего не спрашивать: взять всё из конфига и
@@ -140,6 +140,28 @@ function ConvertTo-PlainText {
     $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($Secure)
     try { return [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr) }
     finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
+}
+
+function Protect-Secret {
+    param([Security.SecureString]$Secure)
+
+    # DPAPI в машинной области: расшифровать сможет любой процесс на этой же
+    # машине, в том числе postinstall.ps1 при первом входе, и никто за её
+    # пределами. Ключ машинный и переживает перезагрузку, но не sysprep
+    # /generalize — его мы и не запускаем.
+    Add-Type -AssemblyName System.Security -ErrorAction SilentlyContinue
+    $plain = ConvertTo-PlainText -Secure $Secure
+    $bytes = [Text.Encoding]::UTF8.GetBytes($plain)
+    try {
+        $protected = [Security.Cryptography.ProtectedData]::Protect(
+            $bytes, $null, [Security.Cryptography.DataProtectionScope]::LocalMachine)
+        return 'DPAPI:' + [Convert]::ToBase64String($protected)
+    }
+    finally {
+        # Открытый текст в памяти процесса не затереть целиком, но свою копию
+        # байтов обнулить можно и нужно.
+        [Array]::Clear($bytes, 0, $bytes.Length)
+    }
 }
 
 function Test-SourceAccess {
@@ -315,14 +337,30 @@ function Select-FromList {
     return @($result)
 }
 
+function Test-ListChanged {
+    param(
+        [string[]]$Was,
+        [string[]]$Now
+    )
+    # Не Compare-Object: в Windows PowerShell 5.1 он отказывается принимать
+    # пустой массив, а пустым здесь бывает и то, и другое.
+    $was = @($Was | Where-Object { $_ })
+    $now = @($Now | Where-Object { $_ })
+    if ($was.Count -ne $now.Count) { return $true }
+    foreach ($item in $was) { if ($now -notcontains $item) { return $true } }
+    foreach ($item in $now) { if ($was -notcontains $item) { return $true } }
+    return $false
+}
+
 function Select-OfficeSetup {
     param($Office)
 
     $result = @{
-        Enabled   = [bool]$Office.enabled
-        ProductId = $Office.productId
-        Channel   = $Office.channel
-        Apps      = @($Office.apps)
+        Enabled            = [bool]$Office.enabled
+        ProductId          = $Office.productId
+        Channel            = $Office.channel
+        Apps               = @($Office.apps)
+        AdditionalProducts = @($Office.additionalProducts)
     }
 
     $suggested = if ($result.Enabled) { 'Y/n' } else { 'y/N' }
@@ -381,6 +419,30 @@ function Select-OfficeSetup {
     Write-Host ''
     Write-Host '    Компоненты Office:'
     $result.Apps = @(Select-FromList -Items $known -Chosen $result.Apps)
+
+    # --- Visio и Project ---
+    # Это не компоненты Office, а отдельные продукты ODT со своими ID, и у
+    # томовой и подписочной редакций ID разные. Предлагаем пару под выбранную.
+    $extraProducts = @{
+        ProPlus2024Volume = @('VisioPro2024Volume', 'ProjectPro2024Volume')
+        ProPlus2021Volume = @('VisioPro2021Volume', 'ProjectPro2021Volume')
+        O365ProPlusRetail = @('VisioProRetail', 'ProjectProRetail')
+    }
+    $available = @($extraProducts[$result.ProductId])
+    if ($available) {
+        # При смене редакции прежний выбор указывает на ID из другой редакции —
+        # переносим его на соответствующий продукт новой.
+        $carried = New-Object System.Collections.Generic.List[string]
+        foreach ($product in $result.AdditionalProducts) {
+            if ($available -contains $product) { $carried.Add($product); continue }
+            $match = @($available | Where-Object { $product -match '^Visio' -and $_ -match '^Visio' })
+            $match += @($available | Where-Object { $product -match '^Project' -and $_ -match '^Project' })
+            foreach ($item in $match) { if (-not $carried.Contains($item)) { $carried.Add($item) } }
+        }
+        Write-Host ''
+        Write-Host '    Visio и Project (отдельные продукты, нужны свои лицензии):'
+        $result.AdditionalProducts = @(Select-FromList -Items $available -Chosen $carried.ToArray())
+    }
 
     return $result
 }
@@ -509,6 +571,9 @@ function Show-InstallPlan {
             if ($office.Enabled) {
             Write-Host ("  Office           : {0}, канал {1}" -f $office.ProductId, $office.Channel)
             Write-Host ("                     {0}" -f $(if ($office.Apps.Count) { $office.Apps -join ', ' } else { 'все компоненты' }))
+            if ($office.AdditionalProducts.Count) {
+                Write-Host ("                     плюс {0}" -f ($office.AdditionalProducts -join ', '))
+            }
         }
         else {
             Write-Host '  Office           : не ставим'
@@ -532,8 +597,11 @@ function Show-InstallPlan {
     if ($office.Enabled) {
         if ($office.ProductId -ne $config.office.productId) { $officeOverride['productId'] = $office.ProductId }
         if ($office.Channel -ne $config.office.channel) { $officeOverride['channel'] = $office.Channel }
-        if (@(Compare-Object -ReferenceObject @($config.office.apps) -DifferenceObject $office.Apps -SyncWindow 0).Count -gt 0) {
+        if (Test-ListChanged -Was @($config.office.apps) -Now $office.Apps) {
             $officeOverride['apps'] = $office.Apps
+        }
+        if (Test-ListChanged -Was @($config.office.additionalProducts) -Now $office.AdditionalProducts) {
+            $officeOverride['additionalProducts'] = $office.AdditionalProducts
         }
     }
     if ($officeOverride.Count -gt 0) { $plan.Office = $officeOverride }
@@ -544,7 +612,7 @@ function Show-InstallPlan {
 
     $default = @($software | Where-Object { -not $_.profiles -or ($_.profiles -contains 'base') } |
         ForEach-Object { $_.name })
-    if (@(Compare-Object -ReferenceObject $default -DifferenceObject $chosen -SyncWindow 0).Count -gt 0) {
+    if (Test-ListChanged -Was $default -Now $chosen) {
         $plan.Include = $chosen
     }
     return $plan
@@ -730,7 +798,7 @@ if (-not $SkipPostInstall) {
             # в доступе» — ровно это и ломало повторные запуски.
             Remove-Item -LiteralPath $credFile -Force -ErrorAction SilentlyContinue
 
-            [IO.File]::WriteAllText($credFile, (ConvertTo-PlainText -Secure $plan.Password),
+            [IO.File]::WriteAllText($credFile, (Protect-Secret -Secure $plan.Password),
                 (New-Object Text.UTF8Encoding $false))
 
             # Полный доступ, а не только чтение: смысл в том, чтобы закрыть
@@ -741,11 +809,11 @@ if (-not $SkipPostInstall) {
             # сообщение в stderr при ErrorActionPreference = Stop обрывает шаг.
             $icacls = (& icacls.exe $credFile /inheritance:r /grant:r '*S-1-5-18:(F)' '*S-1-5-32-544:(F)' 2>&1 | Out-String).Trim()
             if ($LASTEXITCODE -eq 0) {
-                Write-Host "  положил $credFile (доступ: SYSTEM и администраторы)"
+                Write-Host "  положил $credFile (DPAPI этой машины; доступ: SYSTEM и администраторы)"
             }
             else {
                 Write-Warning "Права на $credFile не ограничены (icacls код $LASTEXITCODE): $icacls"
-                Write-Warning 'Файл с паролем доступен всем пользователям машины — поправьте вручную.'
+                Write-Warning 'Файл читается всеми пользователями машины — поправьте права вручную.'
             }
         }
         catch {

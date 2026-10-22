@@ -375,37 +375,42 @@ function Show-InstallPlan {
     elseif ($answer -eq 'n') { $officeEnabled = $false }
 
     # --- План -----------------------------------------------------------------
-    $source = if ($type -eq 'smb') { $share } else { $baseUrl }
-    $extra = @($software | Where-Object { $chosen -notcontains $_.name } | ForEach-Object { $_.name })
+    # Цикл, а не разовый показ: после правки набора план показывается заново,
+    # чтобы ошибку в выборе было видно и можно было переделать.
     $certs = @()
     if ($config.PSObject.Properties['certificates'] -and $config.certificates.enabled) {
         $certs = @($config.certificates.items | ForEach-Object { $_.name })
     }
 
-    Write-Host ''
-    Write-Host '================ План установки ================' -ForegroundColor Cyan
-    Write-Host ("  Источник ПО      : {0} ({1})" -f $source, $type.ToUpperInvariant())
-    Write-Host ("  Учётная запись   : {0}" -f $(if ($user) { $user } else { '— (без аутентификации)' }))
-    Write-Host ("  Программы        : {0}" -f $chosen.Count)
-    foreach ($name in $chosen) { Write-Host "      - $name" }
-    if ($extra.Count -gt 0) {
-        Write-Host ("  Дополнительно    : {0}" -f ($extra -join ', '))
-    }
-    if ($certs.Count -gt 0) {
-        Write-Host ("  Сертификаты      : {0}" -f ($certs -join ', '))
-    }
-    Write-Host ("  Правки реестра   : {0}" -f @($config.registry).Count)
-    Write-Host ("  Office           : {0}" -f $(if ($officeEnabled) { "будет установлен ($officeMode)" } else { 'не ставим' }))
-    Write-Host ("  Часовой пояс     : {0}" -f $config.system.timeZone)
-    Write-Host '  Администратор    : Admin (пароль из файла ответов — смените после установки)'
-    Write-Host '==============================================='
+    while ($true) {
+        $source = if ($type -eq 'smb') { $share } else { $baseUrl }
+        $extra = @($software | Where-Object { $chosen -notcontains $_.name } | ForEach-Object { $_.name })
 
-    $answer = (Read-Host '  Enter — начать, n — изменить набор программ, q — отмена').Trim().ToLowerInvariant()
-    if ($answer -eq 'q') {
-        $plan.Cancelled = $true
-        return $plan
-    }
-    if ($answer -eq 'n') {
+        Write-Host ''
+        Write-Host '================ План установки ================' -ForegroundColor Cyan
+        Write-Host ("  Источник ПО      : {0} ({1})" -f $source, $type.ToUpperInvariant())
+        Write-Host ("  Учётная запись   : {0}" -f $(if ($user) { $user } else { '— (без аутентификации)' }))
+        Write-Host ("  Программы        : {0}" -f $chosen.Count)
+        foreach ($name in $chosen) { Write-Host "      - $name" }
+        if ($extra.Count -gt 0) {
+            Write-Host ("  Не ставим        : {0}" -f ($extra -join ', '))
+        }
+        if ($certs.Count -gt 0) {
+            Write-Host ("  Сертификаты      : {0}" -f ($certs -join ', '))
+        }
+        Write-Host ("  Правки реестра   : {0}" -f @($config.registry).Count)
+        Write-Host ("  Office           : {0}" -f $(if ($officeEnabled) { "будет установлен ($officeMode)" } else { 'не ставим' }))
+        Write-Host ("  Часовой пояс     : {0}" -f $config.system.timeZone)
+        Write-Host '  Администратор    : Admin (пароль из файла ответов — смените после установки)'
+        Write-Host '==============================================='
+
+        $answer = (Read-Host '  Enter — начать, n — изменить набор программ, q — отмена').Trim().ToLowerInvariant()
+        if ($answer -eq 'q') {
+            $plan.Cancelled = $true
+            return $plan
+        }
+        if ($answer -ne 'n') { break }
+
         $chosen = @(Select-PlanSoftware -Software $software -Chosen $chosen)
     }
 

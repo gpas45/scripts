@@ -962,6 +962,18 @@ function New-OfficeConfiguration {
     $languages = if ($Office.languages) { @($Office.languages) } else { @('ru-ru') }
     $apps = if ($Office.apps) { @($Office.apps) } else { @() }
 
+    # Каналы не взаимозаменяемы: томовым редакциям соответствует только
+    # Perpetual-канал своего года. Неверная пара обычно означает не ошибку
+    # установки, а бесконечную загрузку несуществующего канала.
+    $validChannels = @{
+        ProPlus2024Volume = @('PerpetualVL2024')
+        ProPlus2021Volume = @('PerpetualVL2021')
+        O365ProPlusRetail = @('Current', 'SemiAnnual', 'MonthlyEnterprise')
+    }
+    if ($validChannels.ContainsKey($productId) -and $validChannels[$productId] -notcontains $channel) {
+        throw "канал $channel не подходит к редакции $productId. Допустимые: $($validChannels[$productId] -join ', ')."
+    }
+
     $unknown = @($apps | Where-Object { $known -notcontains $_ })
     if ($unknown) {
         # Опечатка в имени иначе молча превратилась бы в «не ставим».
@@ -999,6 +1011,13 @@ function New-OfficeConfiguration {
         [void]$sb.AppendLine(('      <ExcludeApp ID="{0}" />' -f $app))
     }
     [void]$sb.AppendLine('    </Product>')
+    foreach ($product in @($Office.additionalProducts)) {
+        if (-not $product) { continue }
+        # Project и Visio — отдельные продукты, а не компоненты; язык по системе.
+        [void]$sb.AppendLine(('    <Product ID="{0}">' -f $product))
+        [void]$sb.AppendLine('      <Language ID="MatchOS" />')
+        [void]$sb.AppendLine('    </Product>')
+    }
     [void]$sb.AppendLine('  </Add>')
     if ($Office.removeMsi) { [void]$sb.AppendLine('  <RemoveMSI />') }
 
@@ -1027,6 +1046,9 @@ function New-OfficeConfiguration {
     Write-Host "  конфигурация собрана: $productId, канал $channel, $edition-бит"
     Write-Host "  ставим: $installed"
     if ($exclude) { Write-Host "  исключаем: $($exclude -join ', ')" }
+    if ($Office.additionalProducts) {
+        Write-Host "  дополнительные продукты: $(@($Office.additionalProducts) -join ', ')"
+    }
     if ($Office.sourcePath) {
         $pinned = if ($Office.version) { "сборка $($Office.version)" } else { 'сборка не закреплена' }
         Write-Host "  источник: $($Office.sourcePath), $pinned"
@@ -1056,7 +1078,20 @@ function Install-Office {
         $setup = Get-NasFile -Nas $Nas -RelativePath $Office.setupNasPath
     }
     if (-not $setup) {
-        Write-Host '  setup.exe не найден — ставлю Office Deployment Tool через winget.'
+        # Прямая ссылка на ODT надёжнее winget: отдельный пакет, который тоже
+        # надо откуда-то взять, здесь не нужен.
+        Write-Host '  setup.exe не найден — качаю Office Deployment Tool.'
+        $setup = Join-Path -Path $script:WorkDir -ChildPath 'setup.exe'
+        try {
+            Invoke-WebRequest -Uri 'https://officecdn.microsoft.com/pr/wsus/setup.exe' `
+                -OutFile $setup -UseBasicParsing
+        }
+        catch {
+            Write-Warning "  не удалось скачать ODT: $($_.Exception.Message)"
+            $setup = $null
+        }
+    }
+    if (-not $setup) {
         Install-WithWinget -Id 'Microsoft.OfficeDeploymentTool'
         $setup = Get-ChildItem -Filter 'setup.exe' -Recurse -ErrorAction SilentlyContinue -Path @(
             (Join-Path -Path $env:ProgramFiles -ChildPath 'OfficeDeploymentTool'),

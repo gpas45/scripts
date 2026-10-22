@@ -16,6 +16,7 @@
 | `oobe.ps1` | Скачивает `UnattendOOBE.xml`, проверяет его, раскладывает пост-установочные файлы и запускает `sysprep /oobe /reboot /unattend:…`. |
 | `postinstall.ps1` | Пост-установка при первом входе: ПО, правки реестра, системные настройки. Логику не правят — правят `postinstall.json`. |
 | `postinstall.json` | **Единственный файл, который нужно настроить под себя**: адрес NAS, список ПО, правки реестра, системные параметры. |
+| `Download-Office.ps1` | Выкачивает дистрибутив Office через ODT для последующей установки без интернета. Запускается один раз на машине с доступом. |
 | `office/configuration-ProPlus2024Volume.xml` | Эталонная конфигурация ODT: Office LTSC профессиональный плюс 2024, набор по умолчанию. |
 | `office/configuration-ProPlus2021Volume.xml` | То же для Office LTSC Professional Plus 2021. |
 | `office/configuration-M365Apps.xml` | Конфигурация ODT для Microsoft 365 Apps (подписка). |
@@ -715,9 +716,18 @@ Word, Excel, PowerPoint — даёт восемь `ExcludeApp`. Опечатка
 Справочник параметров: [ODT](https://learn.microsoft.com/ru-ru/microsoft-365-apps/deploy/office-deployment-tool-configuration-options),
 ключи KMS: [GVLK](https://learn.microsoft.com/ru-ru/deployoffice/vlactivation/gvlks).
 
-> Project и Visio — отдельные продукты ODT (`ProjectPro2024Volume`,
-> `VisioPro2024Volume`), а не компоненты. Через `apps` их не поставить, нужен
-> свой `configuration.xml` со вторым блоком `<Product>`.
+Project и Visio — отдельные продукты ODT, а не компоненты, поэтому задаются
+отдельным полем:
+
+```json
+"additionalProducts": ["ProjectPro2024Volume", "VisioPro2024Volume"]
+```
+
+Пара редакция/канал проверяется перед установкой: `ProPlus2024Volume` работает
+только с `PerpetualVL2024`, `ProPlus2021Volume` с `PerpetualVL2021`,
+`O365ProPlusRetail` с `Current`, `SemiAnnual` или `MonthlyEnterprise`. Неверная
+пара — это обычно не ошибка установки, а долгая загрузка несуществующего
+канала, поэтому она отсекается сразу.
 
 #### Установка без доступа к CDN Microsoft
 
@@ -726,15 +736,29 @@ Word, Excel, PowerPoint — даёт восемь `ExcludeApp`. Опечатка
 приём, что в [farag2/Install-Office](https://github.com/farag2/Install-Office):
 сначала `setup.exe /download`, потом `setup.exe /configure`.
 
-**Шаг 1, один раз, на машине с доступом.** Положите рядом `setup.exe` из ODT и
-`configuration-ProPlus2024Volume.xml` из [`office/`](office/) и выполните:
+**Шаг 1, один раз, на машине с доступом** — этим занимается
+[`Download-Office.ps1`](Download-Office.ps1), запускать от администратора:
 
-```cmd
-setup.exe /download configuration-ProPlus2024Volume.xml
+```powershell
+.\Download-Office.ps1
+.\Download-Office.ps1 -Branch O365ProPlusRetail -Channel Current -Components Word,Excel,Outlook,Teams
+.\Download-Office.ps1 -AdditionalProducts ProjectPro2024Volume,VisioPro2024Volume
 ```
 
-Рядом появится каталог `Office\Data\<версия>\…` — это и есть дистрибутив.
-Сообщений в консоли не будет, ориентируйтесь по размеру папки.
+Он сам скачивает `setup.exe` (ODT отдаётся по прямой ссылке
+`officecdn.microsoft.com/pr/wsus/setup.exe`, отдельно добывать не нужно),
+собирает `configuration.xml` и запускает загрузку. Сообщений во время
+скачивания не будет — ориентируйтесь по размеру папки.
+
+**Региональная блокировка.** Microsoft не отдаёт дистрибутив Office в
+российский и белорусский регионы. Скрипт временно подменяет регион на польский
+и удаляет ключи `HKCU\…\Office\16.0\Common\Experiment*`, в которых оседает
+то же ограничение. Исходный регион возвращается в блоке `finally` — то есть и
+при ошибке, и при Ctrl+C; если вернуть не удалось, в консоль идёт явное
+требование сделать это вручную. На машине вне этих регионов добавьте
+`-KeepRegion`, и ничего трогаться не будет.
+
+В конце скрипт печатает номер скачанной сборки — он понадобится на шаге 3.
 
 **Шаг 2.** Выложите на раздачу:
 
@@ -769,9 +793,10 @@ Deploy\Office\
 > и задайте `sourcePath` явно (`Z:\Office\Source`). Если источник не задан
 > вовсе, скрипт предупредит об этом в логе перед установкой.
 
-> `setup.exe` из ODT тоже скачивается от Microsoft. Добудьте его один раз
-> и положите на раздачу — `setupNasPath` указывает именно туда. Вариант
-> «поставить ODT через winget» работает только при доступе к Microsoft.
+> Если `setup.exe` на раздаче нет, `postinstall.ps1` скачает ODT по той же
+> прямой ссылке, а если и она недоступна — попробует winget. Но при закрытом
+> доступе к Microsoft надёжнее выложить `setup.exe` на раздачу и указать
+> `setupNasPath`.
 
 ## Учётная запись и пароль
 

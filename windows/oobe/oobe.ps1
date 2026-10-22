@@ -272,6 +272,112 @@ function Select-PlanSoftware {
     return @($result)
 }
 
+function Select-FromList {
+    param(
+        [string[]]$Items,
+        [string[]]$Chosen
+    )
+    Write-Host ''
+    for ($i = 0; $i -lt $Items.Count; $i++) {
+        $mark = if ($Chosen -contains $Items[$i]) { '*' } else { ' ' }
+        Write-Host ('    [{0}] {1,2}. {2}' -f $mark, ($i + 1), $Items[$i])
+    }
+    Write-Host '    Номера через запятую (1,3,5), диапазоны (1-4), all — всё, Enter — оставить.'
+
+    $answer = (Read-Host '    Выбор').Trim()
+    if ([string]::IsNullOrEmpty($answer)) { return $Chosen }
+    if ($answer -eq 'all') { return $Items }
+    if ($answer -eq 'none') { return @() }
+
+    $indexes = New-Object 'System.Collections.Generic.List[int]'
+    foreach ($token in ($answer -split '[,;\s]+' | Where-Object { $_ })) {
+        if ($token -match '^(\d+)\s*-\s*(\d+)$') {
+            foreach ($n in [int]$Matches[1]..[int]$Matches[2]) { $indexes.Add($n) }
+        }
+        elseif ($token -match '^\d+$') {
+            $indexes.Add([int]$token)
+        }
+        else {
+            Write-Warning "    не разобрал «$token» — пропускаю."
+        }
+    }
+    $result = foreach ($n in ($indexes | Sort-Object -Unique)) {
+        if ($n -ge 1 -and $n -le $Items.Count) { $Items[$n - 1] }
+        else { Write-Warning "    номера $n в списке нет — пропускаю." }
+    }
+    return @($result)
+}
+
+function Select-OfficeSetup {
+    param($Office)
+
+    $result = @{
+        Enabled   = [bool]$Office.enabled
+        ProductId = $Office.productId
+        Channel   = $Office.channel
+        Apps      = @($Office.apps)
+    }
+
+    $suggested = if ($result.Enabled) { 'Y/n' } else { 'y/N' }
+    Write-Host ''
+    $answer = (Read-Host "  Ставить Microsoft Office? [$suggested]").Trim().ToLowerInvariant()
+    if ($answer -eq 'y') { $result.Enabled = $true }
+    elseif ($answer -eq 'n') { $result.Enabled = $false }
+    if (-not $result.Enabled) { return $result }
+
+    # --- редакция ---
+    $branches = @(
+        @{ Id = 'ProPlus2024Volume'; Title = 'Office LTSC 2024, томовая лицензия' }
+        @{ Id = 'O365ProPlusRetail'; Title = 'Microsoft 365, подписка' }
+        @{ Id = 'ProPlus2021Volume'; Title = 'Office LTSC 2021, томовая лицензия' }
+    )
+    Write-Host ''
+    for ($i = 0; $i -lt $branches.Count; $i++) {
+        $mark = if ($branches[$i].Id -eq $result.ProductId) { '*' } else { ' ' }
+        Write-Host ('    [{0}] {1}. {2} — {3}' -f $mark, ($i + 1), $branches[$i].Id, $branches[$i].Title)
+    }
+    $answer = (Read-Host '    Редакция (Enter — оставить)').Trim()
+    if ($answer -match '^\d+$' -and [int]$answer -ge 1 -and [int]$answer -le $branches.Count) {
+        $result.ProductId = $branches[[int]$answer - 1].Id
+    }
+
+    # --- канал ---
+    # Каналы не взаимозаменяемы, поэтому предлагаем только подходящие редакции.
+    $validChannels = @{
+        ProPlus2024Volume = @('PerpetualVL2024')
+        ProPlus2021Volume = @('PerpetualVL2021')
+        O365ProPlusRetail = @('Current', 'MonthlyEnterprise', 'SemiAnnual')
+    }
+    $channels = @($validChannels[$result.ProductId])
+    if ($channels.Count -eq 1) {
+        if ($result.Channel -ne $channels[0]) {
+            Write-Host "    Канал: $($channels[0]) — единственный для этой редакции."
+        }
+        $result.Channel = $channels[0]
+    }
+    else {
+        if ($channels -notcontains $result.Channel) { $result.Channel = $channels[0] }
+        Write-Host ''
+        for ($i = 0; $i -lt $channels.Count; $i++) {
+            $mark = if ($channels[$i] -eq $result.Channel) { '*' } else { ' ' }
+            Write-Host ('    [{0}] {1}. {2}' -f $mark, ($i + 1), $channels[$i])
+        }
+        $answer = (Read-Host '    Канал (Enter — оставить)').Trim()
+        if ($answer -match '^\d+$' -and [int]$answer -ge 1 -and [int]$answer -le $channels.Count) {
+            $result.Channel = $channels[[int]$answer - 1]
+        }
+    }
+
+    # --- компоненты ---
+    $known = @('Access', 'Bing', 'Excel', 'Groove', 'Lync', 'OneDrive', 'OneNote',
+        'Outlook', 'PowerPoint', 'Publisher', 'Teams', 'Word')
+    Write-Host ''
+    Write-Host '    Компоненты Office:'
+    $result.Apps = @(Select-FromList -Items $known -Chosen $result.Apps)
+
+    return $result
+}
+
 function Show-InstallPlan {
     param([string]$ConfigPath)
 
@@ -366,13 +472,7 @@ function Show-InstallPlan {
     }
 
     # --- Microsoft Office ------------------------------------------------------
-    $officeEnabled = [bool]$config.office.enabled
-    $officeMode = $config.office.mode
-    $suggested = if ($officeEnabled) { 'Y/n' } else { 'y/N' }
-    Write-Host ''
-    $answer = (Read-Host "  Ставить Microsoft Office, режим ${officeMode}? [$suggested]").Trim().ToLowerInvariant()
-    if ($answer -eq 'y') { $officeEnabled = $true }
-    elseif ($answer -eq 'n') { $officeEnabled = $false }
+    $office = Select-OfficeSetup -Office $config.office
 
     # --- План -----------------------------------------------------------------
     # Цикл, а не разовый показ: после правки набора план показывается заново,
@@ -399,7 +499,13 @@ function Show-InstallPlan {
             Write-Host ("  Сертификаты      : {0}" -f ($certs -join ', '))
         }
         Write-Host ("  Правки реестра   : {0}" -f @($config.registry).Count)
-        Write-Host ("  Office           : {0}" -f $(if ($officeEnabled) { "будет установлен ($officeMode)" } else { 'не ставим' }))
+            if ($office.Enabled) {
+            Write-Host ("  Office           : {0}, канал {1}" -f $office.ProductId, $office.Channel)
+            Write-Host ("                     {0}" -f $(if ($office.Apps.Count) { $office.Apps -join ', ' } else { 'все компоненты' }))
+        }
+        else {
+            Write-Host '  Office           : не ставим'
+        }
         Write-Host ("  Часовой пояс     : {0}" -f $config.system.timeZone)
         Write-Host '  Администратор    : Admin (пароль из файла ответов — смените после установки)'
         Write-Host '==============================================='
@@ -414,9 +520,16 @@ function Show-InstallPlan {
         $chosen = @(Select-PlanSoftware -Software $software -Chosen $chosen)
     }
 
-    if ($officeEnabled -ne [bool]$config.office.enabled) {
-        $plan.Office = @{ enabled = $officeEnabled }
+    $officeOverride = @{}
+    if ($office.Enabled -ne [bool]$config.office.enabled) { $officeOverride['enabled'] = $office.Enabled }
+    if ($office.Enabled) {
+        if ($office.ProductId -ne $config.office.productId) { $officeOverride['productId'] = $office.ProductId }
+        if ($office.Channel -ne $config.office.channel) { $officeOverride['channel'] = $office.Channel }
+        if (@(Compare-Object -ReferenceObject @($config.office.apps) -DifferenceObject $office.Apps -SyncWindow 0).Count -gt 0) {
+            $officeOverride['apps'] = $office.Apps
+        }
     }
+    if ($officeOverride.Count -gt 0) { $plan.Office = $officeOverride }
     if ($type -ne $config.nas.type) { $plan.Nas['type'] = $type }
     if ($baseUrl -ne $config.nas.baseUrl) { $plan.Nas['baseUrl'] = $baseUrl }
     if ($share -ne $config.nas.share) { $plan.Nas['share'] = $share }

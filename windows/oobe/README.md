@@ -48,7 +48,23 @@ powershell -ExecutionPolicy Bypass -File $env:TEMP\oobe.ps1
   Проверяю доступ…
   Доступ есть: HTTP 200, https://oobe.dioservice.ru/Deploy/7-Zip/7z-x64.msi
 
-  Ставить Microsoft Office, режим odt? [y/N]:
+  Ставить Microsoft Office? [y/N]: y
+
+    [*] 1. ProPlus2024Volume — Office LTSC 2024, томовая лицензия
+    [ ] 2. O365ProPlusRetail — Microsoft 365, подписка
+    [ ] 3. ProPlus2021Volume — Office LTSC 2021, томовая лицензия
+    Редакция (Enter — оставить):
+    Канал: PerpetualVL2024 — единственный для этой редакции.
+
+    Компоненты Office:
+    [ ]  1. Access        [*]  8. Outlook
+    [ ]  2. Bing          [*]  9. PowerPoint
+    [*]  3. Excel         [ ] 10. Publisher
+    [ ]  4. Groove        [ ] 11. Teams
+    [ ]  5. Lync          [*] 12. Word
+    [ ]  6. OneDrive
+    [ ]  7. OneNote
+    Выбор:
 
 ================ План установки ================
   Источник ПО      : https://oobe.dioservice.ru/Deploy (HTTP)
@@ -79,6 +95,11 @@ powershell -ExecutionPolicy Bypass -File $env:TEMP\oobe.ps1
 
 Если доступа к раздаче нет, скрипт покажет причину и предложит ввести всё
 заново — адрес и пароль правятся на месте, не доходя до перезагрузки.
+
+Office настраивается прямо здесь: редакция, канал и состав компонентов. Канал
+предлагается только подходящий выбранной редакции, а если он единственный —
+подставляется сам, без лишнего вопроса. Ответы уходят в переопределение, так
+что `postinstall.json` править не нужно.
 
 Пароль вводится скрыто и сохраняется в `C:\ProgramData\oobe\nas.cred` с правами
 только для SYSTEM и администраторов. Ответы складываются в
@@ -724,8 +745,8 @@ Windows умеет сама доставлять приложения в све�
 
 ## Microsoft Office
 
-Включается в опросе `oobe.ps1` («Ставить Microsoft Office?») или флагом
-`office.enabled` в конфиге.
+Включается и настраивается в опросе `oobe.ps1` — редакция, канал, компоненты.
+Без опроса берутся значения из конфига, флаг `office.enabled`.
 
 | `mode` | Что делает |
 |---|---|

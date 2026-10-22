@@ -589,6 +589,33 @@ function Get-WingetVersion {
     return $script:WingetVersion
 }
 
+function Invoke-Winget {
+    param([string[]]$Arguments)
+
+    # winget рисует прогресс символами псевдографики в UTF-8. В консоли с
+    # кодовой страницей 866 это превращается в «тЦИтЦИтЦИ» на пол-экрана,
+    # поэтому на время вызова переключаем кодировку и возвращаем вывод
+    # строкой, а не льём его в консоль: показываем только при ошибке.
+    $previous = $null
+    try {
+        $previous = [Console]::OutputEncoding
+        [Console]::OutputEncoding = [Text.Encoding]::UTF8
+    }
+    catch {
+        Write-Verbose 'Не удалось переключить кодировку консоли.'
+    }
+
+    try {
+        return (& $script:Winget @Arguments 2>&1 | Out-String)
+    }
+    finally {
+        if ($previous) {
+            try { [Console]::OutputEncoding = $previous }
+            catch { Write-Verbose 'Не удалось вернуть кодировку консоли.' }
+        }
+    }
+}
+
 function Install-WithWinget {
     param([string]$Id)
 
@@ -607,16 +634,21 @@ function Install-WithWinget {
         $common += '--disable-interactivity'
     }
 
+    Write-Host "  winget: ставлю $Id…"
+
     $withScope = $common + @('--scope', 'machine')
-    & $script:Winget @withScope 2>&1 | Write-Host
+    $output = Invoke-Winget -Arguments $withScope
     if ($LASTEXITCODE -ne 0) {
         Write-Host "  --scope machine не подошёл (код $LASTEXITCODE) — повторяю без него."
-        & $script:Winget @common 2>&1 | Write-Host
+        $output = Invoke-Winget -Arguments $common
     }
     if ($LASTEXITCODE -ne 0) {
         # Может быть «уже установлено» — проверяем фактическое наличие.
-        & $script:Winget 'list' '--id' $Id '--exact' '--accept-source-agreements' 2>&1 | Out-Null
-        if ($LASTEXITCODE -ne 0) { throw "winget не смог установить $Id." }
+        $null = Invoke-Winget -Arguments @('list', '--id', $Id, '--exact', '--accept-source-agreements')
+        if ($LASTEXITCODE -ne 0) {
+            if ($output) { Write-Host $output.Trim() }
+            throw "winget не смог установить $Id."
+        }
         Write-Host "  $Id уже установлен."
     }
 }
@@ -721,6 +753,12 @@ function Install-FromFile {
 
     $proc = Start-Process @start
 
+    # Обращение к Handle кеширует дескриптор процесса. Без этого у объекта,
+    # полученного от Start-Process -PassThru без -Wait, ExitCode после
+    # завершения читается как $null, и успешная установка выглядит ошибкой
+    # «установщик вернул код .».
+    $null = $proc.Handle
+
     # Ждём с ограничением: установщик, который всё-таки спросил что-то
     # у пользователя, иначе навсегда подвесит первый вход в систему.
     if (-not $proc.WaitForExit($TimeoutSeconds * 1000)) {
@@ -730,6 +768,17 @@ function Install-FromFile {
     $proc.WaitForExit()
 
     $code = $proc.ExitCode
+    if ($null -eq $code) {
+        Start-Sleep -Milliseconds 200
+        $code = $proc.ExitCode
+    }
+    if ($null -eq $code) {
+        # Лучше честно сказать, что кода нет, чем объявить ошибкой установку,
+        # которая на самом деле прошла.
+        Write-Warning '  код возврата получить не удалось — считаю шаг выполненным.'
+        return
+    }
+
     if ($code -eq 3010 -or $code -eq 1641) {
         $script:RebootRequired = $true
         Write-Host '  установщик просит перезагрузку.'
@@ -815,6 +864,7 @@ function Invoke-PostInstallStep {
 
     Write-Host "  после установки: $executable $arguments"
     $proc = Start-Process -FilePath $executable -ArgumentList $arguments -PassThru
+    $null = $proc.Handle
     if (-not $proc.WaitForExit($timeout * 1000)) {
         try { $proc.Kill() } catch { Write-Warning '  не удалось снять зависший процесс.' }
         throw "шаг после установки не завершился за $timeout с и был прерван."
@@ -980,6 +1030,7 @@ function Remove-OneDrive {
     foreach ($setup in $setups) {
         Write-Host "  $setup /uninstall"
         $proc = Start-Process -FilePath $setup -ArgumentList '/uninstall' -PassThru
+        $null = $proc.Handle
         if (-not $proc.WaitForExit(300000)) {
             try { $proc.Kill() } catch { Write-Warning '  не удалось снять зависший OneDriveSetup.' }
             Write-Warning '  OneDriveSetup не завершился за 5 минут и был прерван.'

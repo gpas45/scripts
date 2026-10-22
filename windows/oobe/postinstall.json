@@ -860,6 +860,296 @@
       "profiles": [
         "base"
       ]
+    },
+    {
+      "description": "Office: отключить функции LinkedIn",
+      "path": "HKCU:\\Software\\Microsoft\\Office\\16.0\\Common\\LinkedIn",
+      "name": "OfficeLinkedIn",
+      "type": "DWord",
+      "value": 0,
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "description": "Office: не отправлять диагностику в Microsoft (3 — не отправлять ничего)",
+      "path": "HKCU:\\Software\\Policies\\Microsoft\\office\\common\\clienttelemetry",
+      "name": "SendTelemetry",
+      "type": "DWord",
+      "value": 3,
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "description": "Office: по умолчанию сохранять на компьютер, а не в облако",
+      "path": "HKCU:\\Software\\Policies\\Microsoft\\office\\16.0\\common\\general",
+      "name": "PreferCloudSaveLocations",
+      "type": "DWord",
+      "value": 0,
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "description": "Word: не показывать стартовый экран при запуске",
+      "path": "HKCU:\\Software\\Microsoft\\Office\\16.0\\Word\\Options",
+      "name": "DisableBootToOfficeStart",
+      "type": "DWord",
+      "value": 1,
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "description": "Word: не открывать вложения в режиме чтения",
+      "path": "HKCU:\\Software\\Microsoft\\Office\\16.0\\Word\\Options",
+      "name": "AllowAutoReadingMode",
+      "type": "DWord",
+      "value": 0,
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "description": "Word: показывать линейку",
+      "path": "HKCU:\\Software\\Microsoft\\Office\\16.0\\Word\\Options",
+      "name": "Ruler",
+      "type": "DWord",
+      "value": 1,
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "description": "Word: автосохранение каждые 3 минуты",
+      "path": "HKCU:\\Software\\Microsoft\\Office\\16.0\\Word\\Options",
+      "name": "AutosaveInterval",
+      "type": "DWord",
+      "value": 3,
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "description": "Word: вкладка «Рисование»",
+      "path": "HKCU:\\Software\\Microsoft\\Office\\16.0\\Word\\Options",
+      "name": "DrawInkTab",
+      "type": "DWord",
+      "value": 1,
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "description": "Word: вкладка «Разработчик»",
+      "path": "HKCU:\\Software\\Microsoft\\Office\\16.0\\Word\\Options",
+      "name": "DeveloperTools",
+      "type": "DWord",
+      "value": 1,
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "description": "Excel: не показывать стартовый экран при запуске",
+      "path": "HKCU:\\Software\\Microsoft\\Office\\16.0\\Excel\\Options",
+      "name": "DisableBootToOfficeStart",
+      "type": "DWord",
+      "value": 1,
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "description": "Excel: автосохранение каждые 3 минуты",
+      "path": "HKCU:\\Software\\Microsoft\\Office\\16.0\\Excel\\Options",
+      "name": "AutoRecoverTime",
+      "type": "DWord",
+      "value": 3,
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "description": "Excel: вкладка «Рисование»",
+      "path": "HKCU:\\Software\\Microsoft\\Office\\16.0\\Excel\\Options",
+      "name": "DrawInkTab",
+      "type": "DWord",
+      "value": 1,
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "description": "Excel: вкладка «Разработчик»",
+      "path": "HKCU:\\Software\\Microsoft\\Office\\16.0\\Excel\\Options",
+      "name": "DeveloperTools",
+      "type": "DWord",
+      "value": 1,
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "description": "Excel: обычный стиль ссылок A1 вместо R1C1",
+      "path": "HKCU:\\Software\\Microsoft\\Office\\16.0\\Excel\\Options",
+      "name": "Options",
+      "type": "DWord",
+      "value": 343,
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "description": "Excel: развернуть ленту",
+      "path": "HKCU:\\Software\\Microsoft\\Office\\16.0\\Common\\Toolbars\\Excel",
+      "name": "QuickAccessToolbarStyle",
+      "type": "DWord",
+      "value": 16,
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "description": "PowerPoint: не показывать стартовый экран при запуске",
+      "path": "HKCU:\\Software\\Microsoft\\Office\\16.0\\PowerPoint\\Options",
+      "name": "DisableBootToOfficeStart",
+      "type": "DWord",
+      "value": 1,
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "description": "PowerPoint: автосохранение каждые 3 минуты",
+      "path": "HKCU:\\Software\\Microsoft\\Office\\16.0\\PowerPoint\\Options",
+      "name": "AutoRecoverTime",
+      "type": "DWord",
+      "value": 3,
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "description": "Outlook: не показывать стартовый экран при запуске",
+      "path": "HKCU:\\Software\\Microsoft\\Office\\16.0\\Outlook\\Options",
+      "name": "DisableBootToOfficeStart",
+      "type": "DWord",
+      "value": 1,
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "description": "Outlook: вкладка «Рисование»",
+      "path": "HKCU:\\Software\\Microsoft\\Office\\16.0\\Outlook\\Options",
+      "name": "DrawInkTab",
+      "type": "DWord",
+      "value": 1,
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "description": "Outlook: классическая лента вместо однострочной",
+      "path": "HKCU:\\Software\\Microsoft\\Office\\16.0\\Outlook\\Preferences",
+      "name": "EnableSingleLineRibbon",
+      "type": "DWord",
+      "value": 0,
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "description": "Word: отключить защищённый просмотр для файлов из интернета",
+      "path": "HKCU:\\Software\\Microsoft\\Office\\16.0\\Word\\Security\\ProtectedView",
+      "name": "DisableInternetFilesInPV",
+      "type": "DWord",
+      "value": 1,
+      "profiles": [
+        "office-pv"
+      ]
+    },
+    {
+      "description": "Word: отключить защищённый просмотр для небезопасных расположений",
+      "path": "HKCU:\\Software\\Microsoft\\Office\\16.0\\Word\\Security\\ProtectedView",
+      "name": "DisableUnsafeLocationsInPV",
+      "type": "DWord",
+      "value": 1,
+      "profiles": [
+        "office-pv"
+      ]
+    },
+    {
+      "description": "Word: отключить защищённый просмотр для вложений",
+      "path": "HKCU:\\Software\\Microsoft\\Office\\16.0\\Word\\Security\\ProtectedView",
+      "name": "DisableAttachmentsInPV",
+      "type": "DWord",
+      "value": 1,
+      "profiles": [
+        "office-pv"
+      ]
+    },
+    {
+      "description": "Excel: отключить защищённый просмотр для файлов из интернета",
+      "path": "HKCU:\\Software\\Microsoft\\Office\\16.0\\Excel\\Security\\ProtectedView",
+      "name": "DisableInternetFilesInPV",
+      "type": "DWord",
+      "value": 1,
+      "profiles": [
+        "office-pv"
+      ]
+    },
+    {
+      "description": "Excel: отключить защищённый просмотр для небезопасных расположений",
+      "path": "HKCU:\\Software\\Microsoft\\Office\\16.0\\Excel\\Security\\ProtectedView",
+      "name": "DisableUnsafeLocationsInPV",
+      "type": "DWord",
+      "value": 1,
+      "profiles": [
+        "office-pv"
+      ]
+    },
+    {
+      "description": "Excel: отключить защищённый просмотр для вложений",
+      "path": "HKCU:\\Software\\Microsoft\\Office\\16.0\\Excel\\Security\\ProtectedView",
+      "name": "DisableAttachmentsInPV",
+      "type": "DWord",
+      "value": 1,
+      "profiles": [
+        "office-pv"
+      ]
+    },
+    {
+      "description": "PowerPoint: отключить защищённый просмотр для файлов из интернета",
+      "path": "HKCU:\\Software\\Microsoft\\Office\\16.0\\PowerPoint\\Security\\ProtectedView",
+      "name": "DisableInternetFilesInPV",
+      "type": "DWord",
+      "value": 1,
+      "profiles": [
+        "office-pv"
+      ]
+    },
+    {
+      "description": "PowerPoint: отключить защищённый просмотр для небезопасных расположений",
+      "path": "HKCU:\\Software\\Microsoft\\Office\\16.0\\PowerPoint\\Security\\ProtectedView",
+      "name": "DisableUnsafeLocationsInPV",
+      "type": "DWord",
+      "value": 1,
+      "profiles": [
+        "office-pv"
+      ]
+    },
+    {
+      "description": "PowerPoint: отключить защищённый просмотр для вложений",
+      "path": "HKCU:\\Software\\Microsoft\\Office\\16.0\\PowerPoint\\Security\\ProtectedView",
+      "name": "DisableAttachmentsInPV",
+      "type": "DWord",
+      "value": 1,
+      "profiles": [
+        "office-pv"
+      ]
     }
   ],
   "system": {

@@ -5,6 +5,12 @@
 #
 # ВАЖНО: одни правила фильтра ничего не делают, пока они не привязаны к
 # OSPF-инстансу через in-filter-chain / out-filter-chain (см. секцию ниже).
+#
+# Установка:
+#   /import file-name=ospf_filter_rules.rsc
+#   /routing ospf instance print
+#   /routing ospf instance set [find name="default"] \
+#       in-filter-chain=ospf-in out-filter-chain=ospf-out
 
 # ---------------------------------------------------------------------------
 # Цепочки фильтров

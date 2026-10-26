@@ -7,14 +7,14 @@ tags:
   - telegram
   - script
 created: 2026-06-12
+updated: 2026-10-26
 aliases:
-  - telegram-ip-updater
   - TG address-list
 ---
 
 # Telegram IP Updater — установка на MikroTik
 
-Скрипт [[telegram-ip-updater]] (`routeros/telegram-ip-updater.rsc`) скачивает актуальный список IPv4-сетей Telegram и наполняет ими firewall `address-list` с именем **`TG`**.
+Скрипт `routeros/telegram-ip-updater.rsc` скачивает актуальный список IPv4-сетей Telegram и наполняет ими firewall `address-list` с именем **`TG`**.
 
 > [!info] Назначение
 > Список `TG` сам по себе ничего не блокирует и не разрешает — он используется в правилах firewall (например, разрешить/маркировать трафик к Telegram). Обновляется по расписанию, чтобы соответствовать официальным диапазонам Telegram (`https://core.telegram.org/resources/cidr.txt`).
@@ -23,6 +23,7 @@ aliases:
 > - **RouterOS 6.43+** или **7.x** (используется `/tool fetch ... as-value`).
 > - Доступ роутера в интернет (HTTPS к `core.telegram.org`).
 > - Права скрипта: `read,write,test`.
+> - **device-mode**: на новых устройствах (RouterOS 7.17+) режим `home` запрещает `fetch` и `scheduler`. Проверка — `/system device-mode print`, поднять режим — `/system device-mode update mode=advanced` + физическое подтверждение (кнопка reset/mode или снятие питания). См. [[initial-setup]].
 
 ---
 
@@ -126,5 +127,5 @@ add chain=forward dst-address-list=TG action=accept comment="allow Telegram"
 
 ## Связанные заметки
 
-- [[cloudflare-ip-updater-obsidian|CloudFlare IP Updater]] — тот же подход для CloudFlare
+- [[cloudflare-ip-updater|CloudFlare IP Updater]] — тот же подход для CloudFlare
 - [[initial-setup]] — базовый firewall и interface-lists

@@ -7,17 +7,17 @@ tags:
   - hardening
   - script
 created: 2026-06-13
+updated: 2026-10-26
 aliases:
-  - autorun
   - autorun.rsc
 ---
 
 # Autorun / Bootstrap — первичная настройка MikroTik
 
-Скрипт [[autorun]] (`routeros/autorun.rsc`) — минимальный загрузочный шаблон: базовая адресация, NAT, отключение небезопасных сервисов и синхронизация времени. Подходит для быстрого ввода нового роутера в строй.
+Скрипт `routeros/autorun.rsc` — минимальный загрузочный шаблон: базовая адресация, NAT, отключение небезопасных сервисов и синхронизация времени. Подходит для быстрого ввода нового роутера в строй.
 
 > [!info] Назначение
-> Привести «коробочный» роутер к безопасному минимуму одной командой импорта. Для полноценного firewall и interface-lists смотри расширенный [[initial-setup-obsidian|initial-setup]].
+> Привести «коробочный» роутер к безопасному минимуму одной командой импорта. Для полноценного firewall и interface-lists смотри расширенный [[initial-setup|initial-setup]].
 
 > [!warning] Перед импортом замените заглушки
 > - `add address= interface=ether1 ...` — поле `address=` **пустое**, его обязательно нужно заполнить в формате `IP/префикс` (например, `203.0.113.2/24`), иначе импорт упадёт.
@@ -39,10 +39,18 @@ aliases:
 | `/ip service` | Отключает `telnet`, `ftp`, `www`, `api`, `api-ssl`. |
 | Neighbor / MAC-server | Отключает обнаружение соседей и MAC-доступ (winbox/telnet/ping). |
 | `/ipv6 settings` | `disable-ipv6=yes`. |
-| `/system clock` + `ntp` | Часовой пояс и синхронизация времени с `pool.ntp.org`. |
+| `/system clock` + `ntp` | Часовой пояс (`Asia/Yekaterinburg`) и синхронизация времени с `pool.ntp.org`. |
+
+> [!warning] На новых устройствах сначала `device-mode`
+> На устройствах последних выпусков (RouterOS 7.17+) домашние модели приходят с завода в режиме `home`, где запрещены `fetch` и `scheduler` — установка через `/tool fetch` не сработает (`not allowed by device-mode`). Проверить и поднять режим:
+> ```routeros
+> /system device-mode print
+> /system device-mode update mode=advanced
+> ```
+> Изменение нужно подтвердить физически в течение ~5 минут: кнопка **reset**/**mode** на устройстве либо снятие питания. Обычный `/system reboot` запрос отменяет. Подробности — в [[initial-setup]] и [`routeros/INSTALL.md`](../INSTALL.md).
 
 > [!danger] MAC-доступ отключается полностью
-> В отличие от [[initial-setup-obsidian|initial-setup]], здесь `mac-server` выключен на всех интерфейсах. Убедитесь, что у вас есть рабочий IP-доступ (адрес/шлюз заданы верно), иначе после импорта можно потерять управление и понадобится сброс/Netinstall.
+> В отличие от [[initial-setup|initial-setup]], здесь `mac-server` выключен на всех интерфейсах. Убедитесь, что у вас есть рабочий IP-доступ (адрес/шлюз заданы верно), иначе после импорта можно потерять управление и понадобится сброс/Netinstall.
 
 ---
 
@@ -51,8 +59,9 @@ aliases:
 > [!tip] Способ 1 — импорт файла
 > 1. Залить `autorun.rsc` в **Files** (Winbox/WebFig перетаскиванием) или скачать на роутер:
 >    ```routeros
->    /tool fetch url="https://raw.githubusercontent.com/gpas45/scripts/main/routeros/autorun.rsc"
+>    /tool fetch url="https://raw.githubusercontent.com/gpas45/scripts/main/routeros/autorun.rsc" check-certificate=no
 >    ```
+>    `check-certificate=no` нужен потому, что на свежем роутере часы ещё не выставлены (NTP не отработал) и проверка TLS-сертификата GitHub не пройдёт.
 > 2. Отредактировать заглушки `CHANGE_ME` в файле (например, через WebFig → Files → Edit).
 > 3. Импортировать:
 >    ```routeros
@@ -61,6 +70,27 @@ aliases:
 
 > [!tip] Способ 2 — вручную
 > Скопировать содержимое, заменить заглушки и вставить в терминал RouterOS.
+
+---
+
+## Нюанс с синтаксисом NTP
+
+Скрипт задаёт NTP-серверы через подменю:
+
+```routeros
+/system ntp client servers
+add address=pool.ntp.org
+```
+
+Эта форма есть не во всех версиях. Если импорт падает на этой строке, используйте вариант под свою ветку RouterOS:
+
+```routeros
+/system ntp client set enabled=yes servers=pool.ntp.org              ;# RouterOS 7 (документированный способ)
+/system ntp client set enabled=yes server-dns-names=pool.ntp.org     ;# RouterOS 6
+```
+
+> [!note] Нужен рабочий DNS
+> Имя `pool.ntp.org` резолвится при каждом запросе времени, поэтому без `/ip dns` NTP не заработает. На самом раннем этапе можно задать IP-адреса серверов напрямую.
 
 ---
 
@@ -94,6 +124,6 @@ aliases:
 
 ## Связанные заметки
 
-- [[initial-setup-obsidian|initial-setup]] — расширенная настройка (firewall, port knocking, OSPF-фильтры)
-- [[routerboard-fwupgrade-obsidian|RouterBOARD Firmware Auto-Upgrade]]
-- [[cloudflare-ip-updater-obsidian|CloudFlare IP Updater]]
+- [[initial-setup|initial-setup]] — расширенная настройка (firewall, port knocking, OSPF-фильтры)
+- [[routerboard-fwupgrade|RouterBOARD Firmware Auto-Upgrade]]
+- [[cloudflare-ip-updater|CloudFlare IP Updater]]

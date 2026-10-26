@@ -1,3 +1,15 @@
+# RouterBOARD Star Wars — имперский марш на старте (RouterOS 6.x / 7.x)
+# Создаёт scheduler, который через 15 секунд после загрузки проигрывает на
+# встроенном динамике (beeper) тему имперского марша.
+#
+# Нужно устройство со встроенным динамиком — без него :beep ничего не делает.
+#
+# Установка:
+#   /import file-name=routerboard_starwars.rsc
+#
+# Удаление:
+#   /system scheduler remove [find name=starwars]
+
 /system scheduler
 add name=starwars on-event=":delay 15;\r\
     \n \r\

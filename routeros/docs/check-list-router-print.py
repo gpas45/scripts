@@ -230,7 +230,7 @@ pdf.data_table(
         ["Базовая настройка, отключение небезопасных сервисов, NTP, identity", "autorun.rsc"],
         ["Bridge, interface-lists, firewall (port-knocking, ICMP), NAT, DNS, харднинг, OSPF", "initial-setup.rsc"],
         ["Свежий RouterOS из Stable/Long-term, backup + export наружу", "BackupAndUpdate.rsc"],
-        ["Автообновление прошивки RouterBOARD", "routerboard_fwupgrade"],
+        ["Автообновление прошивки RouterBOARD", "routerboard_fwupgrade.rsc"],
         ["Резервирование двух провайдеров (dual-WAN)", "check-isp.rsc"],
     ],
     col_widths=(120, 58),
@@ -241,7 +241,7 @@ pdf.ln(2)
 pdf.set_font("DejaVu", "", 8)
 pdf.set_text_color(*GREY)
 pdf.multi_cell(0, 4, "Источник: «Чек-лист по настройке маршрутизатора MikroTik», Скоромнов Д. А.  •  "
-                     "Печатная редакция собрана из заметки routeros/docs/check-list-router-obsidian.md",
+                     "Печатная редакция собрана из заметки routeros/docs/check-list-router.md",
                new_x="LMARGIN", new_y="NEXT")
 
 out = "/home/user/scripts/routeros/docs/check-list-router-print.pdf"

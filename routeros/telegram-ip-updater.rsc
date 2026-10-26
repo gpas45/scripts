@@ -3,12 +3,16 @@
 # Скачивает актуальный список IPv4-сетей Telegram и обновляет address-list.
 #
 # Установка:
-# /system script add name=telegram-ip-updater source={ ... код ... }
+# /import file-name=telegram-ip-updater.rsc
+# /system script
+# add name=telegram-ip-updater policy=read,write,test source=[/file get telegram-ip-updater.rsc contents]
 # /system script run telegram-ip-updater
 #
 # Автозапуск:
-# /system scheduler add name=telegram-update interval=1d \
-#     start-time=03:30:00 on-event="/system script run telegram-ip-updater"
+# /system scheduler
+# add name=telegram-update interval=1d start-time=03:30:00 \
+#    on-event="/system script run telegram-ip-updater" \
+#    policy=read,write,test
 
 :local url "https://core.telegram.org/resources/cidr.txt"
 :local listName "TG"

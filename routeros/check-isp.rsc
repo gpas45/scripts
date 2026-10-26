@@ -6,7 +6,8 @@
 #
 # Intended to run periodically from the scheduler, e.g.:
 #   /system scheduler
-#   add name=check-isp interval=30s on-event="/import file-name=check-isp.rsc"
+#   add name=check-isp interval=30s policy=read,write,test \
+#       on-event="/import file-name=check-isp.rsc"
 #
 # Requirements:
 #   - ether1 / ether2 are the ISP1 / ISP2 uplinks (adjust below if different).

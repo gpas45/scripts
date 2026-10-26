@@ -7,14 +7,16 @@ tags:
   - scheduler
   - script
 created: 2026-06-12
+updated: 2026-10-26
 aliases:
   - routerboard_fwupgrade
+  - routerboard_fwupgrade.rsc
   - RouterBOARD firmware upgrade
 ---
 
 # RouterBOARD Firmware Auto-Upgrade — установка на MikroTik
 
-Скрипт [[routerboard_fwupgrade]] (`routeros/routerboard_fwupgrade`) создаёт **scheduler**, который при каждой загрузке сверяет текущую прошивку RouterBOARD с доступной и, если появилась новее, обновляет её и перезагружает роутер.
+Скрипт `routeros/routerboard_fwupgrade.rsc` создаёт **scheduler**, который при каждой загрузке сверяет текущую прошивку RouterBOARD с доступной и, если появилась новее, обновляет её и перезагружает роутер.
 
 > [!info] Зачем
 > Прошивка RouterBOARD обновляется **отдельно** от пакетов RouterOS. После планового апгрейда RouterOS прошивка остаётся старой, пока её не применишь вручную. Этот scheduler делает это автоматически на старте.
@@ -22,6 +24,7 @@ aliases:
 > [!warning] Требования
 > - RouterOS 6.x / 7.x на устройстве RouterBOARD.
 > - Права scheduler: `reboot,read,write,sensitive`.
+> - **device-mode**: на новых устройствах (RouterOS 7.17+) режим `home` запрещает `scheduler`. Проверка — `/system device-mode print`, поднять режим — `/system device-mode update mode=advanced` + физическое подтверждение (кнопка reset/mode или снятие питания). См. [[initial-setup]].
 > - Учитывай, что обновление прошивки **перезагружает роутер**.
 
 ---
@@ -29,13 +32,13 @@ aliases:
 ## Установка
 
 > [!tip] Способ 1 — импорт файла
-> 1. Залить файл `routerboard_fwupgrade` в **Files** (Winbox/WebFig перетаскиванием) или скачать на роутер:
+> 1. Залить файл `routerboard_fwupgrade.rsc` в **Files** (Winbox/WebFig перетаскиванием) или скачать на роутер:
 >    ```routeros
->    /tool fetch url="https://raw.githubusercontent.com/gpas45/scripts/main/routeros/routerboard_fwupgrade"
+>    /tool fetch url="https://raw.githubusercontent.com/gpas45/scripts/main/routeros/routerboard_fwupgrade.rsc"
 >    ```
 > 2. Импортировать (создаст scheduler):
 >    ```routeros
->    /import file-name=routerboard_fwupgrade
+>    /import file-name=routerboard_fwupgrade.rsc
 >    ```
 
 > [!tip] Способ 2 — вручную
@@ -97,5 +100,5 @@ aliases:
 
 ## Связанные заметки
 
-- [[cloudflare-ip-updater-obsidian|CloudFlare IP Updater]]
+- [[cloudflare-ip-updater|CloudFlare IP Updater]]
 - [[initial-setup]] — базовая настройка RouterOS

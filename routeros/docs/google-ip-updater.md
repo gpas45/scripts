@@ -8,14 +8,14 @@ tags:
   - youtube
   - script
 created: 2026-06-12
+updated: 2026-10-26
 aliases:
-  - google-ip-updater
   - VPN_ytb address-list
 ---
 
 # Google IP Updater — установка на MikroTik
 
-Скрипт [[google-ip-updater]] (`routeros/google-ip-updater.rsc`) скачивает официальный список IP-диапазонов Google (`goog.json`) и наполняет ими firewall `address-list` с именем **`VPN_ytb`**. Удобно для policy-routing/VPN на сервисы Google, включая YouTube.
+Скрипт `routeros/google-ip-updater.rsc` скачивает официальный список IP-диапазонов Google (`goog.json`) и наполняет ими firewall `address-list` с именем **`VPN_ytb`**. Удобно для policy-routing/VPN на сервисы Google, включая YouTube.
 
 > [!info] Назначение
 > Список `VPN_ytb` сам по себе ничего не блокирует и не разрешает — он используется в правилах firewall/mangle (например, «заворачивать трафик к Google в VPN-маршрут»). Обновляется по расписанию, чтобы всегда соответствовать официальным диапазонам Google.
@@ -27,6 +27,7 @@ aliases:
 > - **RouterOS 6.43+** или **7.x** (используется `/tool fetch ... as-value`).
 > - Доступ роутера в интернет (HTTPS к `gstatic.com`).
 > - Права скрипта: `read,write,test`.
+> - **device-mode**: на новых устройствах (RouterOS 7.17+) режим `home` запрещает `fetch` и `scheduler`. Проверка — `/system device-mode print`, поднять режим — `/system device-mode update mode=advanced` + физическое подтверждение (кнопка reset/mode или снятие питания). См. [[initial-setup]].
 
 ---
 

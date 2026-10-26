@@ -7,14 +7,16 @@ tags:
   - routing
   - script
 created: 2026-06-13
+updated: 2026-10-26
 aliases:
   - ospf_filter_rules
+  - ospf_filter_rules.rsc
   - OSPF filter rules
 ---
 
 # OSPF Filter Rules — фильтры маршрутов на MikroTik
 
-Конфиг [[ospf_filter_rules]] (`routeros/ospf_filter_rules`) создаёт цепочки `/routing filter rule`, которые пропускают в OSPF и из OSPF **только частные сети RFC1918**, а всё остальное отбрасывают. Для RouterOS **7.x**.
+Конфиг `routeros/ospf_filter_rules.rsc` создаёт цепочки `/routing filter rule`, которые пропускают в OSPF и из OSPF **только частные сети RFC1918**, а всё остальное отбрасывают. Для RouterOS **7.x**.
 
 > [!info] Назначение
 > Не дать «протечь» в домен маршрутизации публичным префиксам, default-route и чужим сетям. Полезно, когда OSPF поднимается между доверенными площадками, но рядом есть аплинки в интернет.
@@ -44,13 +46,13 @@ aliases:
 ## Установка
 
 > [!tip] Импорт файла
-> 1. Залить `ospf_filter_rules` в **Files** или скачать на роутер:
+> 1. Залить `ospf_filter_rules.rsc` в **Files** или скачать на роутер:
 >    ```routeros
->    /tool fetch url="https://raw.githubusercontent.com/gpas45/scripts/main/routeros/ospf_filter_rules"
+>    /tool fetch url="https://raw.githubusercontent.com/gpas45/scripts/main/routeros/ospf_filter_rules.rsc"
 >    ```
 > 2. Импортировать (создаст правила фильтра):
 >    ```routeros
->    /import file-name=ospf_filter_rules
+>    /import file-name=ospf_filter_rules.rsc
 >    ```
 
 ### Привязать цепочки к инстансу
@@ -96,5 +98,5 @@ aliases:
 
 ## Связанные заметки
 
-- [[initial-setup-obsidian|initial-setup]] — содержит встроенный вариант OSPF-фильтров
-- [[autorun-obsidian|autorun]] — первичная настройка роутера
+- [[initial-setup|initial-setup]] — содержит встроенный вариант OSPF-фильтров
+- [[autorun|autorun]] — первичная настройка роутера

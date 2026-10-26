@@ -28,9 +28,9 @@
     "rts-tender.ru";
     "tektorg.ru";
     "zakazrf.ru";
-    "etp-ets.ru"
-    "max.ru"
-    "vk.ru"
+    "etp-ets.ru";
+    "max.ru";
+    "vk.ru";
     "vk.com"
 }
 

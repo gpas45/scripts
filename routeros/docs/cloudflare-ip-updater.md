@@ -7,14 +7,14 @@ tags:
   - cloudflare
   - script
 created: 2026-06-12
+updated: 2026-10-26
 aliases:
-  - cloudflare-ip-updater
   - CF address-list
 ---
 
 # CloudFlare IP Updater — установка на MikroTik
 
-Скрипт [[cloudflare-ip-updater]] (`routeros/cloudflare-ip-updater.rsc`) скачивает актуальный список IPv4-сетей CloudFlare и наполняет ими firewall `address-list` с именем **`CF`**.
+Скрипт `routeros/cloudflare-ip-updater.rsc` скачивает актуальный список IPv4-сетей CloudFlare и наполняет ими firewall `address-list` с именем **`CF`**.
 
 > [!info] Назначение
 > Список `CF` сам по себе ничего не блокирует и не разрешает — он используется в правилах firewall (например, «пропускать только CloudFlare к веб-серверу»). Обновляется по расписанию, чтобы всегда соответствовать официальным диапазонам CloudFlare.
@@ -23,6 +23,7 @@ aliases:
 > - **RouterOS 6.43+** или **7.x** (используется `/tool fetch ... as-value`).
 > - Доступ роутера в интернет (HTTPS к `cloudflare.com`).
 > - Права скрипта: `read,write,test`.
+> - **device-mode**: на новых устройствах (RouterOS 7.17+) режим `home` запрещает `fetch` и `scheduler`. Проверка — `/system device-mode print`, поднять режим — `/system device-mode update mode=advanced` + физическое подтверждение (кнопка reset/mode или снятие питания). См. [[initial-setup]].
 
 ---
 

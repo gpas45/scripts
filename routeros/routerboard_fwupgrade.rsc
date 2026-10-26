@@ -6,6 +6,14 @@
 # Прошивка RouterBOARD обновляется отдельно от пакетов RouterOS, поэтому
 # проверка на старте — после планового апгрейда RouterOS — оптимальна:
 # зацикливания нет, т.к. после применения current-firmware == upgrade-firmware.
+#
+# Установка:
+#   /import file-name=routerboard_fwupgrade.rsc
+#
+# На новых устройствах (RouterOS 7.17+) заводской device-mode может запрещать
+# scheduler. Проверка: /system device-mode print
+# Разрешить:    /system device-mode update mode=advanced
+# затем подтвердить физически — кнопка reset/mode или снятие питания.
 
 /system scheduler
 add name=routerboard_fwupgrade comment="Auto-upgrade RouterBOARD firmware at startup" \

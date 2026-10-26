@@ -5,14 +5,17 @@ type: инструкция
 оборудование: MikroTik RouterOS 7.17+
 дата: 2026-09-21
 статус: рабочая
-проверено: 2026-09-21
+проверено: 2026-10-26
 теги:
   - сеть/dns
   - mikrotik
   - routeros
   - госуслуги
   - фнс
-repo: https://github.com/USERNAME/mikrotik-ru-gov-dns
+repo: https://github.com/gpas45/scripts
+scripts:
+  - routeros/ru-gov-dns-forward.rsc
+  - routeros/ru-gov-dns-forward-legacy.rsc
 ---
 
 # DNS-форвардинг госсайтов на MikroTik
@@ -224,16 +227,56 @@ nslookup www.gosuslugi.ru 213.59.253.3 # напрямую к GSLB, изнутр�
 
 ## Скрипты
 
-Готовые скрипты вынесены в репозиторий (см. свойство `repo` в заголовке заметки):
+Конфигурация выше оформлена готовыми скриптами в этом же репозитории:
 
-- `mikrotik/ru-gov-dns-forward.rsc` — идемпотентная установка, RouterOS 7.17+
-- `mikrotik/ru-gov-dns-forward-legacy.rsc` — вариант без `forwarders`
-- `mikrotik/ru-gov-dns-remove.rsc` — полный откат
-- `scripts/dns-check.sh` — сравнение ответов по списку доменов через несколько резолверов
-- `domains.txt` — список зон, общий для скриптов
+| Файл | Для чего |
+|---|---|
+| `routeros/ru-gov-dns-forward.rsc` | Основной вариант, **RouterOS 7.17+**: создаёт forwarder `yandex` (`77.88.8.8`, `77.88.8.1`), статические записи `type=FWD` с `match-subdomain=yes` и наполняет address-list `RU-GOV`. |
+| `routeros/ru-gov-dns-forward-legacy.rsc` | Для RouterOS 7.x **ниже 7.17**, где нет `/ip dns forwarders`: `forward-to` указывает прямо на `77.88.8.8`, резервного сервера нет, address-list не наполняется. |
+
+### Установка
+
+```routeros
+/tool fetch url="https://raw.githubusercontent.com/gpas45/scripts/main/routeros/ru-gov-dns-forward.rsc"
+/file print                                      ;# убедиться, что файл на роутере
+/import file-name=ru-gov-dns-forward.rsc
+```
+
+Файл можно залить и вручную: Winbox/WebFig → **Files** → перетащить `.rsc`.
+
+> [!tip] Скрипт идемпотентный
+> Свои записи он помечает комментарием `ru-gov-dns: <домен>` и при каждом запуске удаляет только их, после чего создаёт заново. Чужие статические записи DNS не трогает, forwarder — создаёт или обновляет. Повторный `import` безопасен, расписание не нужно — ставить на scheduler имеет смысл только если вы правите список доменов в файле.
+
+### Что настраивается в начале файла
+
+```routeros
+:local fwdName     "yandex"               ;# имя forwarder'а
+:local dnsServers  "77.88.8.8,77.88.8.1"  ;# российский резолвер + резерв
+:local tag         "ru-gov-dns"           ;# метка своих записей в comment
+:local addrList    "RU-GOV"               ;# "" — не наполнять address-list
+```
+
+Список доменов — в переменной `:local domains` там же. Помимо разобранных выше зон в него добавлены `gov.ru` (накрывает `nalog.gov.ru` и `zakupki.gov.ru` целиком за счёт `match-subdomain`) и `max.ru` / `vk.ru` / `vk.com`.
+
+### Проверка и откат
+
+```routeros
+/ip dns forwarders print
+/ip dns static print where type=FWD
+/ip firewall address-list print where list=RU-GOV
+```
+
+Полный откат — удалить записи по метке и сам forwarder:
+
+```routeros
+/ip dns static remove [find where comment~"ru-gov-dns"]
+/ip dns forwarders remove [find name="yandex"]
+/ip dns cache flush
+```
 
 ## Ссылки
 
+- [[initial-setup|initial-setup]] — базовая настройка роутера (в т.ч. `/ip dns` и interface-lists, на которые опираются правила перехвата)
 - [[MikroTik — базовая настройка]]
 - [[Диагностика DNS]]
 - [MikroTik Docs — DNS](https://help.mikrotik.com/docs/spaces/ROS/pages/37748767/DNS)

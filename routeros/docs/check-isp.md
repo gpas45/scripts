@@ -7,15 +7,15 @@ tags:
   - failover
   - script
 created: 2026-06-13
+updated: 2026-10-26
 aliases:
-  - check-isp
   - check-isp.rsc
   - dual-wan failover
 ---
 
 # Dual-WAN ISP Failover — проверка каналов на MikroTik
 
-Скрипт [[check-isp]] (`routeros/check-isp.rsc`) проверяет доступность двух провайдеров пингом через каждый аплинк. Если канал «лёг» (ноль успешных ответов) — сбрасывает его помеченные соединения из conntrack, чтобы сессии переехали на живого провайдера.
+Скрипт `routeros/check-isp.rsc` проверяет доступность двух провайдеров пингом через каждый аплинк. Если канал «лёг» (ноль успешных ответов) — сбрасывает его помеченные соединения из conntrack, чтобы сессии переехали на живого провайдера.
 
 > [!info] Назначение
 > Ускорить переключение между двумя ISP при отказе одного из каналов. Сам по себе скрипт **не настраивает** маршрутизацию — он лишь чистит conntrack-записи упавшего канала; за раздачу трафика отвечают ваши mangle-правила и маршруты.
@@ -25,6 +25,7 @@ aliases:
 > - Mangle-правила, помечающие соединения как `con-isp1` / `con-isp2` (`connection-mark`).
 > - Маршруты/таблицы для каждого ISP (policy-routing или `check-gateway`).
 > - Права scheduler/скрипта: `read,write,test`.
+> - **device-mode**: на новых устройствах (RouterOS 7.17+) режим `home` запрещает `scheduler`. Проверка — `/system device-mode print`, поднять режим — `/system device-mode update mode=advanced` + физическое подтверждение (кнопка reset/mode или снятие питания). См. [[initial-setup]].
 
 ---
 
@@ -100,5 +101,5 @@ add name=check-isp interval=30s policy=read,write,test \
 
 ## Связанные заметки
 
-- [[initial-setup-obsidian|initial-setup]] — базовый firewall и interface-lists
-- [[autorun-obsidian|autorun]] — первичная настройка роутера
+- [[initial-setup|initial-setup]] — базовый firewall и interface-lists
+- [[autorun|autorun]] — первичная настройка роутера

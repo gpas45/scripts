@@ -10,13 +10,13 @@ created: 2026-06-12
 updated: 2026-10-26
 aliases:
   - routerboard_fwupgrade
-  - routerboard_fwupgrade.rsc
+  - routerboard-fwupgrade.rsc
   - RouterBOARD firmware upgrade
 ---
 
 # RouterBOARD Firmware Auto-Upgrade — установка на MikroTik
 
-Скрипт `routeros/routerboard_fwupgrade.rsc` создаёт **scheduler**, который при каждой загрузке сверяет текущую прошивку RouterBOARD с доступной и, если появилась новее, обновляет её и перезагружает роутер.
+Скрипт `routeros/routerboard-fwupgrade.rsc` создаёт **scheduler**, который при каждой загрузке сверяет текущую прошивку RouterBOARD с доступной и, если появилась новее, обновляет её и перезагружает роутер.
 
 > [!info] Зачем
 > Прошивка RouterBOARD обновляется **отдельно** от пакетов RouterOS. После планового апгрейда RouterOS прошивка остаётся старой, пока её не применишь вручную. Этот scheduler делает это автоматически на старте.
@@ -32,13 +32,13 @@ aliases:
 ## Установка
 
 > [!tip] Способ 1 — импорт файла
-> 1. Залить файл `routerboard_fwupgrade.rsc` в **Files** (Winbox/WebFig перетаскиванием) или скачать на роутер:
+> 1. Залить файл `routerboard-fwupgrade.rsc` в **Files** (Winbox/WebFig перетаскиванием) или скачать на роутер:
 >    ```routeros
->    /tool fetch url="https://raw.githubusercontent.com/gpas45/scripts/main/routeros/routerboard_fwupgrade.rsc"
+>    /tool fetch url="https://raw.githubusercontent.com/gpas45/scripts/main/routeros/routerboard-fwupgrade.rsc"
 >    ```
 > 2. Импортировать (создаст scheduler):
 >    ```routeros
->    /import file-name=routerboard_fwupgrade.rsc
+>    /import file-name=routerboard-fwupgrade.rsc
 >    ```
 
 > [!tip] Способ 2 — вручную

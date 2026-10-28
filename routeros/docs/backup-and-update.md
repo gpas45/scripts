@@ -11,13 +11,12 @@ created: 2026-06-13
 updated: 2026-10-26
 aliases:
   - BackupAndUpdate
-  - BackupAndUpdate.rsc
-  - backup-and-update
+  - backup-and-update.rsc
 ---
 
 # Backup & Update — автоматический бэкап и обновление RouterOS
 
-Скрипт `routeros/BackupAndUpdate.rsc` создаёт ежедневные резервные копии MikroTik (полный системный бэкап `.backup` + экспорт конфигурации `.rsc`) и отправляет их на e-mail. Дополнительно умеет уведомлять о новых версиях RouterOS и автоматически их устанавливать вместе с обновлением прошивки RouterBOARD.
+Скрипт `routeros/backup-and-update.rsc` создаёт ежедневные резервные копии MikroTik (полный системный бэкап `.backup` + экспорт конфигурации `.rsc`) и отправляет их на e-mail. Дополнительно умеет уведомлять о новых версиях RouterOS и автоматически их устанавливать вместе с обновлением прошивки RouterBOARD.
 
 > [!info] Назначение
 > Использовать почтовый ящик как хранилище бэкапов и держать прошивку в актуальном состоянии без ручного вмешательства. Перед автообновлением всегда снимается резервная копия, а сам апдейт отменяется, если бэкап не удалось отправить письмом.
@@ -69,7 +68,7 @@ aliases:
 
 ### 1. Настройте параметры
 
-Откройте `routeros/BackupAndUpdate.rsc` и заполните секцию `--- MODIFY THIS SECTION AS NEEDED ---` в начале файла. Все параметры подробно прокомментированы.
+Откройте `routeros/backup-and-update.rsc` и заполните секцию `--- MODIFY THIS SECTION AS NEEDED ---` в начале файла. Все параметры подробно прокомментированы.
 
 > [!important]
 > Обязательно укажите корректный `emailAddress` и проверьте значение `scriptMode`.
@@ -104,10 +103,10 @@ aliases:
 > Скрипту нужны **все** политики: он экспортирует конфиг с паролями, отправляет почту, создаёт задачу планировщика и перезагружает роутер.
 
 > [!tip] Альтернатива — из загруженного файла
-> Если `BackupAndUpdate.rsc` уже лежит в **Files** (с заполненной секцией параметров), скрипт создаётся одной командой:
+> Если `backup-and-update.rsc` уже лежит в **Files** (с заполненной секцией параметров), скрипт создаётся одной командой:
 > ```routeros
 > /system script
-> add name=BackupAndUpdate source=[/file get BackupAndUpdate.rsc contents] \
+> add name=BackupAndUpdate source=[/file get backup-and-update.rsc contents] \
 >     policy=ftp,reboot,read,write,policy,test,password,sniff,sensitive
 > ```
 > Не используйте `/import` для этого файла: `import` выполнит код один раз и ничего не установит — скрипт должен быть именованным, иначе планировщику нечего запускать.

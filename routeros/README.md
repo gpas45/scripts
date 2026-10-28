@@ -5,6 +5,10 @@
 Подробная документация по каждому скрипту (установка, проверка, типовые ошибки) —
 в [`docs/`](docs/): по одному `.md`-файлу на скрипт, имя совпадает с именем скрипта.
 
+Имена файлов — строчными буквами через дефис, расширение у всех скриптов `.rsc`.
+Имена объектов на роутере (задачи планировщика, именованные скрипты) от имён
+файлов не зависят и остаются как в коде.
+
 ## Способы установки
 
 В RouterOS нет «скачать и выполнить одной строкой»: `import` работает только с
@@ -67,29 +71,29 @@
 | Файл | Назначение | Установка |
 |---|---|---|
 | `check-isp.rsc` | Dual-WAN: проверка двух провайдеров пингом через каждый аплинк и сброс conntrack-записей упавшего канала (`connection-mark` `con-isp1`/`con-isp2`). Маршруты и mangle-метки настраиваются отдельно. | **C**: `/system scheduler add name=check-isp interval=30s policy=read,write,test on-event="/import file-name=check-isp.rsc"`. Подробно — [`docs/check-isp.md`](docs/check-isp.md). |
-| `ospf_filter_rules.rsc` | Фильтры OSPF (RouterOS 7): принимать и анонсировать только частные подсети RFC 1918, остальное — `reject`. | **A**: `/import file-name=ospf_filter_rules.rsc`, затем привязать цепочки: `/routing ospf instance set [find name="default"] in-filter-chain=ospf-in out-filter-chain=ospf-out`. Подробно — [`docs/ospf-filter-rules.md`](docs/ospf-filter-rules.md). |
+| `ospf-filter-rules.rsc` | Фильтры OSPF (RouterOS 7): принимать и анонсировать только частные подсети RFC 1918, остальное — `reject`. | **A**: `/import file-name=ospf-filter-rules.rsc`, затем привязать цепочки: `/routing ospf instance set [find name="default"] in-filter-chain=ospf-in out-filter-chain=ospf-out`. Подробно — [`docs/ospf-filter-rules.md`](docs/ospf-filter-rules.md). |
 
 ## DNS
 
 | Файл | Назначение | Установка |
 |---|---|---|
-| `ru-gov-dns-forward.rsc` | Условная пересылка DNS российских госсайтов (Госуслуги, ФНС, ЭТП, VK/MAX) на резолвер внутри РФ через `/ip dns forwarders` + статические записи `type=FWD` c `match-subdomain=yes`; опционально наполняет address-list `RU-GOV`. Требует **RouterOS 7.17+**. Идемпотентен — свои записи помечает комментарием `ru-gov-dns` и пересоздаёт. | **A**: `/import file-name=ru-gov-dns-forward.rsc`. Повторный запуск безопасен. Разбор проблемы и настройка клиентов — [`docs/DNS-форвардинг госсайтов на MikroTik.md`](docs/DNS-форвардинг%20госсайтов%20на%20MikroTik.md). |
+| `ru-gov-dns-forward.rsc` | Условная пересылка DNS российских госсайтов (Госуслуги, ФНС, ЭТП, VK/MAX) на резолвер внутри РФ через `/ip dns forwarders` + статические записи `type=FWD` c `match-subdomain=yes`; опционально наполняет address-list `RU-GOV`. Требует **RouterOS 7.17+**. Идемпотентен — свои записи помечает комментарием `ru-gov-dns` и пересоздаёт. | **A**: `/import file-name=ru-gov-dns-forward.rsc`. Повторный запуск безопасен. Разбор проблемы и настройка клиентов — [`docs/ru-gov-dns-forward.md`](docs/ru-gov-dns-forward.md). |
 | `ru-gov-dns-forward-legacy.rsc` | То же для RouterOS 7.x **ниже 7.17**, где нет `/ip dns forwarders`: `forward-to` принимает один IP, резервного сервера нет. | **A**: `/import file-name=ru-gov-dns-forward-legacy.rsc`. |
 
 ## Обслуживание
 
 | Файл | Назначение | Установка |
 |---|---|---|
-| `BackupAndUpdate.rsc` | Автоматический бэкап MikroTik (система + конфиг) с отправкой на e-mail, уведомления о новых версиях RouterOS и автообновление RouterOS/прошивки RouterBOARD. Версия 26.02.22, минимум RouterOS 6.43.7. | **B**, но имя скрипта обязательно `BackupAndUpdate`. Перед установкой заполнить секцию `MODIFY THIS SECTION AS NEEDED` (минимум `emailAddress`, `scriptMode`) и настроить **Tools → Email**. Пошагово — [`docs/backupandupdate.md`](docs/backupandupdate.md). |
-| `routerboard_fwupgrade.rsc` | Задание планировщика: сверяет `current-firmware` с `upgrade-firmware` при каждой загрузке и, если есть новее, обновляет прошивку RouterBOARD с перезагрузкой. | **A** (создаёт scheduler): `/import file-name=routerboard_fwupgrade.rsc`. Подробно — [`docs/routerboard-fwupgrade.md`](docs/routerboard-fwupgrade.md). |
-| `routerboard_starwars.rsc` | Имперский марш на системном динамике через 15 секунд после загрузки. | **A** (создаёт scheduler): `/import file-name=routerboard_starwars.rsc`. Подробно — [`docs/routerboard-starwars.md`](docs/routerboard-starwars.md). |
+| `backup-and-update.rsc` | Автоматический бэкап MikroTik (система + конфиг) с отправкой на e-mail, уведомления о новых версиях RouterOS и автообновление RouterOS/прошивки RouterBOARD. Версия 26.02.22, минимум RouterOS 6.43.7. | **B**, но имя скрипта **на роутере** обязательно `BackupAndUpdate` (от имени файла не зависит — на него ссылается внутренняя задача планировщика). Перед установкой заполнить секцию `MODIFY THIS SECTION AS NEEDED` (минимум `emailAddress`, `scriptMode`) и настроить **Tools → Email**. Пошагово — [`docs/backup-and-update.md`](docs/backup-and-update.md). |
+| `routerboard-fwupgrade.rsc` | Задание планировщика: сверяет `current-firmware` с `upgrade-firmware` при каждой загрузке и, если есть новее, обновляет прошивку RouterBOARD с перезагрузкой. | **A** (создаёт scheduler): `/import file-name=routerboard-fwupgrade.rsc`. Подробно — [`docs/routerboard-fwupgrade.md`](docs/routerboard-fwupgrade.md). |
+| `routerboard-starwars.rsc` | Имперский марш на системном динамике через 15 секунд после загрузки. | **A** (создаёт scheduler): `/import file-name=routerboard-starwars.rsc`. Подробно — [`docs/routerboard-starwars.md`](docs/routerboard-starwars.md). |
 
 ## docs/
 
 | Файл | Содержимое |
 |---|---|
 | `<имя скрипта>.md` | Документация по каждому скрипту: назначение, требования, установка, проверка результата, типовые ошибки. Оформление под Obsidian (callouts, wiki-ссылки), но читается и на GitHub. |
-| `DNS-форвардинг госсайтов на MikroTik.md` | Разбор, почему госсайты не резолвятся через зарубежные DNS (делегированная GSLB-зона, CDN NGENIX), и настройка условного форвардинга. |
+| `ru-gov-dns-forward.md` | Разбор, почему госсайты не резолвятся через зарубежные DNS (делегированная GSLB-зона, CDN NGENIX), и настройка условного форвардинга. |
 | `check-list-router.md` | Чек-лист настройки роутера MikroTik (RouterOS 7) с контрольными точками. |
 | `check-list-router-print.py` | Генератор PDF-версии чек-листа (`fpdf2`, шрифты DejaVu) → `check-list-router-print.pdf`. |
 | `mikrotik_check-list_router.pdf` | Исходный PDF чек-листа (автор — Скоромнов Д. А.). |

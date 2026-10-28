@@ -10,13 +10,13 @@ created: 2026-06-13
 updated: 2026-10-26
 aliases:
   - routerboard_starwars
-  - routerboard_starwars.rsc
+  - routerboard-starwars.rsc
   - imperial march
 ---
 
 # RouterBOARD Star Wars — имперский марш на старте MikroTik
 
-Конфиг `routeros/routerboard_starwars.rsc` создаёт scheduler, который при загрузке роутера проигрывает на встроенном динамике мелодию имперского марша из «Звёздных войн».
+Конфиг `routeros/routerboard-starwars.rsc` создаёт scheduler, который при загрузке роутера проигрывает на встроенном динамике мелодию имперского марша из «Звёздных войн».
 
 > [!info] Назначение
 > Чисто развлекательный «звуковой индикатор» завершения загрузки — приятно слышать, что роутер поднялся. Никакой функциональной нагрузки.
@@ -43,13 +43,13 @@ aliases:
 ## Установка
 
 > [!tip] Импорт файла
-> 1. Залить `routerboard_starwars.rsc` в **Files** или скачать на роутер:
+> 1. Залить `routerboard-starwars.rsc` в **Files** или скачать на роутер:
 >    ```routeros
->    /tool fetch url="https://raw.githubusercontent.com/gpas45/scripts/main/routeros/routerboard_starwars.rsc"
+>    /tool fetch url="https://raw.githubusercontent.com/gpas45/scripts/main/routeros/routerboard-starwars.rsc"
 >    ```
 > 2. Импортировать (создаст scheduler):
 >    ```routeros
->    /import file-name=routerboard_starwars.rsc
+>    /import file-name=routerboard-starwars.rsc
 >    ```
 
 ---

@@ -5,7 +5,7 @@
 # Нужно устройство со встроенным динамиком — без него :beep ничего не делает.
 #
 # Установка:
-#   /import file-name=routerboard_starwars.rsc
+#   /import file-name=routerboard-starwars.rsc
 #
 # Удаление:
 #   /system scheduler remove [find name=starwars]

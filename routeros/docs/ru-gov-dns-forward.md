@@ -16,6 +16,10 @@ repo: https://github.com/gpas45/scripts
 scripts:
   - routeros/ru-gov-dns-forward.rsc
   - routeros/ru-gov-dns-forward-legacy.rsc
+aliases:
+  - DNS-форвардинг госсайтов на MikroTik
+  - ru-gov-dns-forward
+  - ru-gov-dns-forward-legacy
 ---
 
 # DNS-форвардинг госсайтов на MikroTik

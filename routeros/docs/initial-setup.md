@@ -209,6 +209,6 @@ nc -z -w1 ROUTER_IP 12345
 - [[ospf-filter-rules|OSPF filter rules]] — фильтры маршрутов отдельным файлом
 - [[rdp-bruteforce|RDP brute-force protection]] — защита RDP поверх этого firewall
 - [[routerboard-fwupgrade|RouterBOARD Firmware Auto-Upgrade]]
-- [[backupandupdate|Backup & Update]] — бэкапы и обновление RouterOS
+- [[backup-and-update|Backup & Update]] — бэкапы и обновление RouterOS
 - [[cloudflare-ip-updater|CloudFlare IP Updater]] · [[telegram-ip-updater|Telegram]] · [[google-ip-updater|Google]]
 - [[check-list-router|Чек-лист настройки роутера]]

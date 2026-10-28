@@ -215,7 +215,7 @@ pdf.h2("6. Прочие обязательные шаги")
 pdf.chk("Настроить **NTP-клиента** (служба времени).")
 pdf.chk("Сделать резервное копирование (backup + export) и **вынести копии за пределы роутера**. Выполнять **после** шагов из раздела 7.")
 pdf.callout("tip", "Автоматизация бэкапа",
-            "Пункт «backup + export наружу» автоматизирует скрипт **BackupAndUpdate.rsc** (routeros/): ежедневный бэкап системы и конфигурации на e-mail плюс автообновление RouterOS/RouterBOARD.")
+            "Пункт «backup + export наружу» автоматизирует скрипт **backup-and-update.rsc** (routeros/): ежедневный бэкап системы и конфигурации на e-mail плюс автообновление RouterOS/RouterBOARD.")
 
 pdf.h2("7. Прочие шаги (по необходимости)")
 pdf.chk("Настроить пробросы портов.")
@@ -229,8 +229,8 @@ pdf.data_table(
     [
         ["Базовая настройка, отключение небезопасных сервисов, NTP, identity", "autorun.rsc"],
         ["Bridge, interface-lists, firewall (port-knocking, ICMP), NAT, DNS, харднинг, OSPF", "initial-setup.rsc"],
-        ["Свежий RouterOS из Stable/Long-term, backup + export наружу", "BackupAndUpdate.rsc"],
-        ["Автообновление прошивки RouterBOARD", "routerboard_fwupgrade.rsc"],
+        ["Свежий RouterOS из Stable/Long-term, backup + export наружу", "backup-and-update.rsc"],
+        ["Автообновление прошивки RouterBOARD", "routerboard-fwupgrade.rsc"],
         ["Резервирование двух провайдеров (dual-WAN)", "check-isp.rsc"],
     ],
     col_widths=(120, 58),

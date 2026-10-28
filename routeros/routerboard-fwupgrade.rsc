@@ -8,7 +8,7 @@
 # зацикливания нет, т.к. после применения current-firmware == upgrade-firmware.
 #
 # Установка:
-#   /import file-name=routerboard_fwupgrade.rsc
+#   /import file-name=routerboard-fwupgrade.rsc
 #
 # На новых устройствах (RouterOS 7.17+) заводской device-mode может запрещать
 # scheduler. Проверка: /system device-mode print

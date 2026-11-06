@@ -65,6 +65,7 @@
 | `cloudflare-ip-updater.rsc` | Обновление address-list `CF` актуальными IPv4-подсетями Cloudflare. Требует RouterOS 6.43+ (`fetch ... as-value`). | **B**, расписание `interval=7d start-time=03:31:00`. Разово — **A**. Подробно — [`docs/cloudflare-ip-updater.md`](docs/cloudflare-ip-updater.md). |
 | `telegram-ip-updater.rsc` | Обновление address-list `TG` актуальными IPv4-подсетями Telegram (`core.telegram.org/resources/cidr.txt`). RouterOS 6.43+. | **B**, расписание `interval=1d start-time=03:30:00`. Подробно — [`docs/telegram-ip-updater.md`](docs/telegram-ip-updater.md). |
 | `google-ip-updater.rsc` | Обновление address-list `VPN_ytb` диапазонами Google из `goog.json` — для policy-routing на Google/YouTube. Чистит только свои записи (по `comment=google-auto`). RouterOS 6.43+. | **B**, расписание `interval=7d start-time=03:41:00`. Подробно — [`docs/google-ip-updater.md`](docs/google-ip-updater.md). |
+| `wol-on-port.rsc` | Wake-on-LAN по обращению на TCP-порт: правило firewall кладёт источник в `wol-trigger`, скрипт по расписанию видит список и шлёт магический пакет через `/tool wol`. Повторы гасятся пингом машины и списком `wol-cooldown`. Перед установкой заполнить `CHANGE_ME` (MAC, интерфейс, IP). | **B**, расписание `interval=5s`, плюс одно правило-триггер в firewall. Подробно — [`docs/wol-on-port.md`](docs/wol-on-port.md). |
 
 ## Маршрутизация и каналы
 

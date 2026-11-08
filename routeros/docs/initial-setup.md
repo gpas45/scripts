@@ -210,5 +210,5 @@ nc -z -w1 ROUTER_IP 12345
 - [[rdp-bruteforce|RDP brute-force protection]] — защита RDP поверх этого firewall
 - [[routerboard-fwupgrade|RouterBOARD Firmware Auto-Upgrade]]
 - [[backup-and-update|Backup & Update]] — бэкапы и обновление RouterOS
-- [[cloudflare-ip-updater|CloudFlare IP Updater]] · [[telegram-ip-updater|Telegram]] · [[google-ip-updater|Google]]
+- [[ip-lists-updater|IP Lists Updater]] — `VPN_ytb` (Google) · `TG` (Telegram) · `CF` (CloudFlare) · [[ip-updater|IP Updater]]
 - [[check-list-router|Чек-лист настройки роутера]]

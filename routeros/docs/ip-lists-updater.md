@@ -20,7 +20,7 @@ aliases:
 
 # IP Lists Updater — установка на MikroTik
 
-Скрипт `routeros/ip-lists-updater.rsc` — объединённая замена трёх отдельных апдейтеров (`google-ip-updater.rsc`, `telegram-ip-updater.rsc`, `cloudflare-ip-updater.rsc`). Один запуск скачивает три официальных списка IPv4-сетей и наполняет **три разных** `address-list`.
+Скрипт `routeros/ip-lists-updater.rsc` заменил три отдельных апдейтера (Google, Telegram, CloudFlare — удалены из репозитория, лежат в истории git). Один запуск скачивает три официальных списка IPv4-сетей и наполняет **три разных** `address-list`.
 
 | Источник | URL | address-list | `comment` своих записей |
 |---|---|---|---|

@@ -145,5 +145,5 @@ aliases:
 | Резервирование двух провайдеров (dual-WAN) | [[check-isp\|check-isp]] (`check-isp.rsc`) |
 | Фильтрация маршрутов OSPF (только RFC1918) | [[ospf-filter-rules\|ospf-filter-rules.rsc]] |
 | Пробросы портов: защита опубликованного RDP от перебора | [[rdp-bruteforce\|rdp-bruteforce]] (`rdp-bruteforce.rsc`) |
-| Address-lists для firewall и policy-routing | [[cloudflare-ip-updater\|CloudFlare]] · [[telegram-ip-updater\|Telegram]] · [[google-ip-updater\|Google]] |
+| Address-lists для firewall и policy-routing | [[ip-lists-updater\|ip-lists-updater]] (`VPN_ytb` · `TG` · `CF`) · [[ip-updater\|ip-updater]] |
 | DNS: госсайты не резолвятся через зарубежные резолверы | [[ru-gov-dns-forward]] (`ru-gov-dns-forward.rsc`) |

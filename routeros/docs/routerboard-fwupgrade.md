@@ -100,5 +100,5 @@ aliases:
 
 ## Связанные заметки
 
-- [[cloudflare-ip-updater|CloudFlare IP Updater]]
+- [[ip-lists-updater|IP Lists Updater]] — address-lists Google / Telegram / CloudFlare
 - [[initial-setup]] — базовая настройка RouterOS

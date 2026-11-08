@@ -126,4 +126,4 @@ add address=pool.ntp.org
 
 - [[initial-setup|initial-setup]] — расширенная настройка (firewall, port knocking, OSPF-фильтры)
 - [[routerboard-fwupgrade|RouterBOARD Firmware Auto-Upgrade]]
-- [[cloudflare-ip-updater|CloudFlare IP Updater]]
+- [[ip-lists-updater|IP Lists Updater]] — address-lists Google / Telegram / CloudFlare

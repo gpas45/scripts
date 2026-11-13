@@ -349,16 +349,12 @@
           "%ProgramFiles%\\Aspia\\Host\\aspia_host.exe"
         ]
       },
-      "postInstall": {
-        "nasPath": "Aspia/aspia-host-config.json",
-        "executable": "%ProgramFiles%\\Aspia\\Host\\aspia_host.exe",
-        "arguments": "--import \"{file}\" --silent",
-        "validateJson": true,
-        "stopService": "aspia-host-service",
-        "logGlob": "%TEMP%\\aspia\\aspia_host-*.log",
-        "timeoutSeconds": 180,
-        "successCodes": []
-      },
+      "companions": [
+        {
+          "nasPath": "Aspia/aspia-host.json",
+          "name": "aspia-host.json"
+        }
+      ],
       "timeoutSeconds": 600,
       "profiles": [
         "base",
@@ -366,23 +362,26 @@
       ],
       "_comment": [
         "Сборки: https://github.com/dchapyshev/aspia/releases — положите MSI на NAS.",
-        "Конфиг не копируется, а импортируется: у хоста есть ключи --import и",
-        "--silent (видно в source/host/main.cc), поэтому после установки",
-        "выполняется aspia_host.exe --import <файл> --silent.",
-        "Файл aspia-host-config.json кладётся на NAS рядом с дистрибутивом.",
-        "executable: если путь не существует, исполняемый файл ищется по имени",
-        "в Program Files — у разных сборок каталог отличается.",
-        "{file} в arguments заменяется на путь к скачанному конфигу.",
+        "Актуальна ветка 3.x (aspia-host-3.x.y-x86_64.msi).",
         "",
-        "validateJson — разобрать файл перед передачей и переписать без BOM:",
-        "               Qt считает BOM синтаксической ошибкой, импорт выходит",
-        "               с кодом 1 и ничего не объясняет, а BOM ставит Блокнот.",
-        "stopService  — остановить службу на время шага и вернуть обратно.",
-        "               Импорт пишет в базу host.db3, которую служба держит",
-        "               открытой; да и новые настройки подхватываются только",
-        "               при старте службы.",
-        "logGlob      — где искать лог программы, если шаг вернул не ноль.",
-        "               Aspia кладёт его в %TEMP%\\aspia."
+        "Конфиг не импортируется отдельной командой, а кладётся рядом с MSI:",
+        "установщик Aspia 3 сам выполняет после распаковки файлов",
+        "  aspia_host.exe --import=\"[SourceDir]aspia-host.json\" --silent",
+        "(installer/windows/host.wxs), где SourceDir — каталог самого MSI.",
+        "Делает он это до запуска службы и от имени SYSTEM, то есть когда",
+        "база ещё никем не занята: поэтому так импорт проходит, а отдельным",
+        "вызовом после установки — нет.",
+        "",
+        "Имя файла обязано быть ровно aspia-host.json: установщик ищет его",
+        "строго по нему. На раздаче файл может называться иначе — companions",
+        "переименует при копировании (поле name).",
+        "Файл с BOM установщик молча не примет (у его custom action стоит",
+        "Return=ignore), поэтому .json из companions разбирается и",
+        "переписывается без BOM перед установкой.",
+        "",
+        "Импорт выполняется только при первой установке (условие NOT",
+        "Installed). На машине, где Aspia уже стоит, настройки не поменяются:",
+        "снимите её или задайте -Reinstall."
       ]
     },
     {

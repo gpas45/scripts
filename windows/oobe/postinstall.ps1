@@ -934,6 +934,54 @@ function Install-FromFile {
     if ($code -ne 0) { throw "установщик вернул код $code." }
 }
 
+function Copy-InstallerCompanion {
+    param(
+        $Item,
+        $Nas,
+        [string]$InstallerPath
+    )
+    # Часть установщиков забирает настройки из файла, лежащего рядом с ними.
+    # Так устроен Aspia 3: его MSI после распаковки файлов сам выполняет
+    # aspia_host.exe --import="[SourceDir]aspia-host.json" --silent, где
+    # SourceDir — каталог самого MSI (installer/windows/host.wxs). Делает он
+    # это до запуска службы и от имени SYSTEM, то есть именно тогда, когда
+    # база ещё никем не занята — поэтому импорт установщиком работает, а
+    # отдельным вызовом после установки нет.
+    if (-not $Item.PSObject.Properties['companions'] -or -not $Item.companions) { return }
+
+    $folder = Split-Path -Parent $InstallerPath
+    foreach ($entry in @($Item.companions)) {
+        if (-not $entry.nasPath) { continue }
+
+        $required = $true
+        if ($entry.PSObject.Properties['required']) { $required = [bool]$entry.required }
+
+        $file = Get-NasFile -Nas $Nas -RelativePath $entry.nasPath
+        if (-not $file) {
+            if (-not $required) {
+                Write-Warning "  файла $($entry.nasPath) на источнике нет — ставлю без него."
+                continue
+            }
+            throw "рядом с установщиком должен лежать $($entry.nasPath), а на источнике его нет."
+        }
+
+        # Имя важно: установщик ищет файл строго по нему, а на раздаче он
+        # может называться иначе.
+        $name = if ($entry.name) { $entry.name } else { Split-Path -Leaf $file }
+        $target = Join-Path -Path $folder -ChildPath $name
+        if ($file -ne $target) {
+            Move-Item -LiteralPath $file -Destination $target -Force
+        }
+        if ($name -like '*.json') {
+            # Тот же разбор, что у Qt: BOM для него синтаксическая ошибка, а
+            # установщик Aspia ошибку импорта глотает (Return="ignore") —
+            # получилась бы молча ненастроенная машина.
+            Test-JsonFile -Path $target
+        }
+        Write-Host "  рядом с установщиком положен $name"
+    }
+}
+
 function Copy-ApplicationConfig {
     param(
         $Item,
@@ -1154,6 +1202,7 @@ function Install-Application {
             $file = Get-NasFile -Nas $Nas -RelativePath $Item.nasPath
             if ($file) {
                 Test-FileChecksum -Path $file -Checksums $Item.checksums
+                Copy-InstallerCompanion -Item $Item -Nas $Nas -InstallerPath $file
                 Install-FromFile -Path $file -Arguments $Item.installerArgs -TimeoutSeconds $timeout -StdinNull:$stdinNull -SuccessCodes $successCodes
                 Copy-ApplicationConfig -Item $Item -Nas $Nas
                 Invoke-PostInstallStep -Item $Item -Nas $Nas
@@ -1178,6 +1227,7 @@ function Install-Application {
         $dest = Join-Path -Path $script:WorkDir -ChildPath $name
         Invoke-WebRequest -Uri $Item.installerUrl -OutFile $dest -UseBasicParsing
         Test-FileChecksum -Path $dest -Checksums $Item.checksums
+        Copy-InstallerCompanion -Item $Item -Nas $Nas -InstallerPath $dest
         Install-FromFile -Path $dest -Arguments $Item.installerArgs -TimeoutSeconds $timeout -StdinNull:$stdinNull -SuccessCodes $successCodes
         Copy-ApplicationConfig -Item $Item -Nas $Nas
         Invoke-PostInstallStep -Item $Item -Nas $Nas

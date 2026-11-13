@@ -1,9 +1,19 @@
 # Скрипт первичной настройки RouterOS 7
-# На основе routeros/autorun.scr, расширен списками интерфейсов и правилами firewall.
+# На основе routeros/autorun.rsc, расширен списками интерфейсов и правилами firewall.
 # Для RouterOS 6 используйте initial-setup-ros6.rsc (отличается синтаксис NTP /
 # IPv6 / фильтров маршрутов / топиков логирования).
 #
 # Использование:
+#   0. На новых устройствах (RouterOS 7.17+) сначала поднимите device-mode:
+#      заводской режим "home" запрещает scheduler и fetch, из-за чего не
+#      сработают ни установка через /tool fetch, ни задача автообновления
+#      прошивки RouterBOARD из этого скрипта (ошибка "not allowed by
+#      device-mode").
+#        /system device-mode print
+#        /system device-mode update mode=advanced
+#      Изменение нужно подтвердить физически в течение ~5 минут: кнопка
+#      reset (или mode) на устройстве либо снятие питания. Обычный
+#      /system reboot запрос отменяет. Подробности — в INSTALL.md.
 #   1. Просмотрите и поправьте плейсхолдеры CHANGE_ME / <...> ниже.
 #   2. Назначьте реальные интерфейсы спискам LAN / WAN / StS / VPN в
 #      секции "/interface list member".

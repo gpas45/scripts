@@ -7,8 +7,8 @@ tags:
   - hardening
   - firewall
 created: 2026-06-13
+updated: 2026-10-26
 aliases:
-  - check-list-router
   - чек-лист MikroTik
   - mikrotik checklist
 ---
@@ -125,7 +125,7 @@ aliases:
 - [ ] Сделать резервное копирование (`backup` + `export`) и **вынести копии за пределы роутера**. Выполнять **после** шагов из раздела ниже.
 
 > [!tip] Автоматизация бэкапа
-> Пункт «backup + export наружу» автоматизирует [[backupandupdate-obsidian|BackupAndUpdate.rsc]]: ежедневный бэкап (система + конфиг) на e-mail и автообновление RouterOS/RouterBOARD.
+> Пункт «backup + export наружу» автоматизирует [[backup-and-update|backup-and-update.rsc]]: ежедневный бэкап (система + конфиг) на e-mail и автообновление RouterOS/RouterBOARD.
 
 ## Прочие шаги (по необходимости)
 
@@ -138,8 +138,12 @@ aliases:
 
 | Раздел чек-листа | Скрипт |
 |---|---|
-| Базовая настройка, отключение небезопасных сервисов, NTP, identity | [[autorun]] (`autorun.rsc`) |
-| Bridge, interface-lists, firewall (port-knocking, ICMP), NAT, DNS, харднинг, OSPF | [[initial-setup-obsidian\|initial-setup]] (`initial-setup.rsc`) |
-| Свежий RouterOS из Stable/Long-term, backup + export наружу | [[backupandupdate-obsidian\|BackupAndUpdate]] (`BackupAndUpdate.rsc`) |
-| Автообновление прошивки RouterBOARD | `routerboard_fwupgrade`, шаг 2 в `BackupAndUpdate.rsc` |
-| Резервирование двух провайдеров (dual-WAN) | [[check-isp-obsidian\|check-isp]] (`check-isp.rsc`) |
+| Базовая настройка, отключение небезопасных сервисов, NTP, identity | [[autorun\|autorun]] (`autorun.rsc`) |
+| Bridge, interface-lists, firewall (port-knocking, ICMP), NAT, DNS, харднинг, OSPF | [[initial-setup\|initial-setup]] (`initial-setup-ros7.rsc` / `initial-setup-ros6.rsc`) |
+| Свежий RouterOS из Stable/Long-term, backup + export наружу | [[backup-and-update\|BackupAndUpdate]] (`backup-and-update.rsc`) |
+| Автообновление прошивки RouterBOARD | [[routerboard-fwupgrade\|routerboard-fwupgrade.rsc]], шаг 2 в `backup-and-update.rsc` |
+| Резервирование двух провайдеров (dual-WAN) | [[check-isp\|check-isp]] (`check-isp.rsc`) |
+| Фильтрация маршрутов OSPF (только RFC1918) | [[ospf-filter-rules\|ospf-filter-rules.rsc]] |
+| Пробросы портов: защита опубликованного RDP от перебора | [[rdp-bruteforce\|rdp-bruteforce]] (`rdp-bruteforce.rsc`) |
+| Address-lists для firewall и policy-routing | [[ip-lists-updater\|ip-lists-updater]] (`VPN_ytb` · `TG` · `CF`) · [[ip-updater\|ip-updater]] |
+| DNS: госсайты не резолвятся через зарубежные резолверы | [[ru-gov-dns-forward]] (`ru-gov-dns-forward.rsc`) |

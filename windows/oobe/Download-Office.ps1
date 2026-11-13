@@ -195,8 +195,10 @@ finally {
 }
 
 $data = Join-Path -Path $Path -ChildPath 'Office\Data'
+# Сортировка строк поставила бы 16.0.9126 выше 16.0.17932: «9» > «1».
 $version = (Get-ChildItem -Path $data -Directory -ErrorAction SilentlyContinue |
-    Sort-Object -Property Name -Descending | Select-Object -First 1).Name
+    Where-Object { $_.Name -match '^\d+(\.\d+){3}$' } |
+    Sort-Object { [version]$_.Name } | Select-Object -Last 1).Name
 
 Write-Host ''
 Write-Host 'Готово.' -ForegroundColor Green

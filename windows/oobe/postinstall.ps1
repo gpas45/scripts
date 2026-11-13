@@ -316,15 +316,17 @@ function Unprotect-Secret {
     }
 
     Add-Type -AssemblyName System.Security -ErrorAction SilentlyContinue
-    $bytes = [Convert]::FromBase64String($text.Substring(6))
     try {
+        # Разбор base64 тоже внутри try: у повреждённого файла иначе наружу
+        # выходит «недопустимая длина массива Base-64» вместо объяснения.
+        $bytes = [Convert]::FromBase64String($text.Substring(6))
         $plain = [Security.Cryptography.ProtectedData]::Unprotect(
             $bytes, $null, [Security.Cryptography.DataProtectionScope]::LocalMachine)
     }
     catch {
         # Ключ DPAPI машинный: файл, принесённый с другой машины или
         # переживший sysprep /generalize, не расшифруется здесь никогда.
-        throw "пароль из nas.cred не расшифровывается на этой машине ($($_.Exception.Message)). Файл с паролем от другой машины не подходит — запустите oobe.ps1 заново или задайте -NasPassword."
+        throw "пароль из nas.cred не прочитался ($($_.Exception.Message)). Файл мог быть повреждён или принесён с другой машины — ключ DPAPI машинный. Запустите oobe.ps1 заново или задайте -NasPassword."
     }
     try { return [Text.Encoding]::UTF8.GetString($plain) }
     finally { [Array]::Clear($plain, 0, $plain.Length) }
@@ -386,6 +388,13 @@ function Connect-NasShare {
         return
     }
     $password = Get-NasPassword -Nas $Nas
+    if ([string]::IsNullOrEmpty($password)) {
+        # $null в аргументах нативной команды PowerShell не передаёт вовсе:
+        # получилось бы net use <путь> /user:<имя> — без пароля, то есть
+        # с интерактивным запросом, которого при автоматическом прогоне
+        # никто не увидит и не закроет. Лучше сказать сразу.
+        throw "для $share задана учётная запись $user, но пароля нет: ни -NasPassword, ни nas.passwordFile (его кладёт oobe.ps1 как nas.cred). Для гостевого доступа очистите nas.user."
+    }
 
     try {
         New-SmbMapping -RemotePath $share -UserName $user -Password $password -ErrorAction Stop | Out-Null
@@ -722,15 +731,38 @@ function Test-ApplicationInstalled {
         }
     }
 
+    $minVersion = if ($detect.PSObject.Properties['minVersion']) { $detect.minVersion } else { $null }
+
     if (-not $found) {
         # Запись о деинсталляции есть не у всего; тогда смотрим файл.
         if ($detect.PSObject.Properties['path'] -and $detect.path) {
             foreach ($candidate in @($detect.path)) {
                 $expanded = [Environment]::ExpandEnvironmentVariables($candidate)
-                if (Test-Path -LiteralPath $expanded) {
+                if (-not (Test-Path -LiteralPath $expanded)) { continue }
+
+                if ([string]::IsNullOrWhiteSpace($minVersion)) {
                     Write-Host "  уже установлено, найден $expanded"
                     return $true
                 }
+
+                # Со старой версии на новую иначе не перейти: файл на месте,
+                # и пакет пропускался бы всегда. Берём версию из самого файла.
+                $fileVersion = $null
+                try { $fileVersion = (Get-Item -LiteralPath $expanded).VersionInfo.FileVersion }
+                catch { $fileVersion = $null }
+
+                $installed = ConvertTo-ComparableVersion -Value $fileVersion
+                $required = ConvertTo-ComparableVersion -Value $minVersion
+                if (-not $installed -or -not $required) {
+                    Write-Warning "  найден $expanded, но сравнить его версию «$fileVersion» с $minVersion не удалось — считаю установленным."
+                    return $true
+                }
+                if ($installed -ge $required) {
+                    Write-Host "  уже установлено: $expanded $installed (не ниже $minVersion)"
+                    return $true
+                }
+                Write-Host "  найден $expanded версии $installed, это ниже $minVersion — обновляю."
+                return $false
             }
         }
         return $false
@@ -738,23 +770,23 @@ function Test-ApplicationInstalled {
 
     $shown = if ($found.DisplayVersion) { "$($found.DisplayName) $($found.DisplayVersion)" } else { $found.DisplayName }
 
-    if (-not $detect.PSObject.Properties['minVersion'] -or -not $detect.minVersion) {
+    if ([string]::IsNullOrWhiteSpace($minVersion)) {
         Write-Host "  уже установлено: $shown"
         return $true
     }
 
     $installed = ConvertTo-ComparableVersion -Value $found.DisplayVersion
-    $required = ConvertTo-ComparableVersion -Value $detect.minVersion
+    $required = ConvertTo-ComparableVersion -Value $minVersion
     if (-not $installed -or -not $required) {
-        Write-Warning "  установлено $shown, но сравнить с $($detect.minVersion) не удалось — пропускаю."
+        Write-Warning "  установлено $shown, но сравнить с $minVersion не удалось — пропускаю."
         return $true
     }
     if ($installed -ge $required) {
-        Write-Host "  уже установлено: $shown (не ниже $($detect.minVersion))"
+        Write-Host "  уже установлено: $shown (не ниже $minVersion)"
         return $true
     }
 
-    Write-Host "  установлено $shown, это ниже $($detect.minVersion) — обновляю."
+    Write-Host "  установлено $shown, это ниже $minVersion — обновляю."
     return $false
 }
 
@@ -1093,7 +1125,8 @@ function Invoke-PostInstallStep {
         throw "шаг после установки: не найден $($step.executable)."
     }
 
-    $arguments = $step.arguments
+    # arguments может не быть вовсе: программу иногда достаточно запустить.
+    $arguments = if ($step.PSObject.Properties['arguments'] -and $step.arguments) { [string]$step.arguments } else { '' }
     if ($step.nasPath) {
         $file = Get-NasFile -Nas $Nas -RelativePath $step.nasPath
         if (-not $file) {
@@ -1133,7 +1166,10 @@ function Invoke-PostInstallStep {
     try {
         Write-Host "  после установки: $executable $arguments"
         $started = Get-Date
-        $proc = Start-Process -FilePath $executable -ArgumentList $arguments -PassThru
+        # ArgumentList с пустой строкой Start-Process не принимает.
+        $launch = @{ FilePath = $executable; PassThru = $true }
+        if ($arguments) { $launch['ArgumentList'] = $arguments }
+        $proc = Start-Process @launch
         $null = $proc.Handle
         if (-not $proc.WaitForExit($timeout * 1000)) {
             try { $proc.Kill() } catch { Write-Warning '  не удалось снять зависший процесс.' }
@@ -1373,10 +1409,10 @@ function Copy-OfficeSourceLocally {
         [string]$Path
     )
     # Ставит Office не setup.exe, а служба Click-to-Run, работающая от имени
-    # SYSTEM. Наше подключение к раздаче — SMB или WebDAV — заведено в сеансе
-    # пользователя, и SYSTEM о нём ничего не знает: по сети он ходит учётной
-    # записью машины. Отсюда 1603 на источнике, который в проводнике
-    # открывается. Лечится переносом дистрибутива на локальный диск.
+    # SYSTEM. Наше подключение к SMB-раздаче заведено в сеансе пользователя,
+    # и SYSTEM о нём ничего не знает: по сети он ходит учётной записью машины.
+    # Отсюда 1603 на источнике, который в проводнике открывается. Лечится
+    # переносом дистрибутива на локальный диск.
     $target = if ($Office.PSObject.Properties['localCachePath'] -and $Office.localCachePath) {
         [Environment]::ExpandEnvironmentVariables($Office.localCachePath)
     }
@@ -1385,20 +1421,10 @@ function Copy-OfficeSourceLocally {
     }
 
     $sourceSize = 0
-    $biggest = $null
     foreach ($file in @(Get-ChildItem -LiteralPath $Path -Recurse -File -ErrorAction SilentlyContinue)) {
         $sourceSize += $file.Length
-        if (-not $biggest -or $file.Length -gt $biggest.Length) { $biggest = $file }
     }
     $sourceGb = [math]::Round($sourceSize / 1GB, 2)
-
-    # Через WebDAV файл больше 4 ГБ не пройдёт никаким пределом: это потолок
-    # самого клиента. Лучше сказать сразу, чем после получаса копирования.
-    if ($Path -match '@SSL' -and $biggest -and $biggest.Length -gt 4294967295) {
-        throw ("файл $($biggest.Name) весит $([math]::Round($biggest.Length / 1GB, 2)) ГБ — " +
-            'через WebDAV не передать, предел клиента 4 ГБ. Выложите дистрибутив по SMB ' +
-            '(nas.type = smb) или положите его на машину заранее и укажите office.sourcePath.')
-    }
 
     $drive = Split-Path -Qualifier $target
     $free = (Get-PSDrive -Name $drive.TrimEnd(':') -ErrorAction SilentlyContinue).Free
@@ -1433,7 +1459,11 @@ function Get-OdtLogExcerpt {
     # <Logging Path> слушается только самим setup.exe. Установку выполняет
     # служба Click-to-Run от имени SYSTEM, и её лог ложится в temp этой
     # учётной записи — C:\Windows\Temp, — поэтому смотрим во все места.
-    $ours = @('postinstall.log', 'oobe.log')
+    # Отсекаем свои логи по фактическим путям, а не по именам: -LogPath
+    # задаётся ключом, и при своём имени транскрипт этого же скрипта оказался
+    # бы «логом ODT» — он лежит в том же каталоге и всегда самый свежий.
+    $ours = @([IO.Path]::GetFileName($LogPath), 'postinstall.log', 'oobe.log') |
+        Where-Object { $_ } | Select-Object -Unique
     $candidates = New-Object System.Collections.Generic.List[object]
     foreach ($dir in $Directory) {
         if (-not $dir) { continue }
@@ -2117,7 +2147,8 @@ else {
 }
 Write-Host "Лог: $LogPath"
 
-if ($script:RebootRequired -or ($config.system -and $config.system.rebootWhenDone)) {
+$rebootFromConfig = (-not $SkipSystem) -and $config.system -and $config.system.rebootWhenDone
+if ($script:RebootRequired -or $rebootFromConfig) {
     Write-Host 'Требуется перезагрузка — через 60 секунд. Отменить: shutdown /a'
     & shutdown.exe /r /t 60 /c 'Завершение настройки рабочей станции'
 }

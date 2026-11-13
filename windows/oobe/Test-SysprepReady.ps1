@@ -11,12 +11,12 @@
         .\Test-SysprepReady.ps1
         .\Test-SysprepReady.ps1 -Fix
 
-    Самая частая причина — пакет приложения, установленный одному
-    пользователю, но не внесённый в образ (или наоборот). Так получается,
-    когда Магазин успел обновить встроенное приложение для текущего
-    пользователя, либо когда что-то поставили через Add-AppxPackage без
-    Add-AppxProvisionedPackage. С -Fix такие пакеты снимаются у всех
-    пользователей — после этого generalize проходит.
+    Самая частая причина — пакет приложения, который у пользователя не такой,
+    как в образе: либо его в образе нет вовсе (поставили через Add-AppxPackage
+    без Add-AppxProvisionedPackage), либо версии разошлись — Магазин обновил
+    встроенное приложение для текущего пользователя. Сверяются и имя, и
+    версия. С -Fix такие пакеты снимаются у всех пользователей — после этого
+    generalize проходит.
 
     Запускать от администратора. Ничего не меняет без -Fix.
 
@@ -123,7 +123,16 @@ function Get-AppxMismatch {
         if ($package.IsFramework) { continue }
         if ($package.SignatureKind -eq 'System') { continue }
         if ($package.NonRemovable) { continue }
-        if ($provisioned.ContainsKey($package.Name)) { continue }
+        # Сверять имя мало: самый частый отказ generalize — Магазин обновил
+        # встроенное приложение для текущего пользователя, и в образе осталась
+        # прежняя версия. Имя при этом совпадает, а sysprep всё равно пишет
+        # «installed for a user, but not provisioned for all users».
+        $inImage = $provisioned.ContainsKey($package.Name)
+        $imageVersion = if ($inImage) { [string]$provisioned[$package.Name] } else { $null }
+        $userVersion = [string]$package.Version
+        if ($inImage -and $imageVersion -eq $userVersion) { continue }
+
+        $reason = if (-not $inImage) { 'в образ не внесён' } else { "в образе версия $imageVersion" }
 
         $users = @($package.PackageUserInformation |
             Where-Object { $_.InstallState -eq 'Installed' } |
@@ -131,7 +140,8 @@ function Get-AppxMismatch {
         $mismatch.Add([pscustomobject]@{
             Name        = $package.Name
             FullName    = $package.PackageFullName
-            Version     = $package.Version
+            Version     = $userVersion
+            Reason      = $reason
             Users       = $users
         })
     }
@@ -141,10 +151,10 @@ function Get-AppxMismatch {
         return @()
     }
 
-    Add-Problem "$($mismatch.Count) пакет(ов) установлено у пользователя, но не внесено в образ — generalize на этом и останавливается."
+    Add-Problem "$($mismatch.Count) пакет(ов) у пользователя не совпадает с образом — generalize на этом и останавливается."
     foreach ($item in $mismatch) {
         $who = if ($item.Users) { $item.Users -join ', ' } else { 'пользователь не определён' }
-        Write-Host "    - $($item.Name) $($item.Version) ($who)"
+        Write-Host "    - $($item.Name) $($item.Version) — $($item.Reason) ($who)"
     }
     return $mismatch.ToArray()
 }
